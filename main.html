@@ -1,32 +1,32 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<title>Medieval Voxel World</title>
-<style>
-*{margin:0;padding:0;overflow:hidden;}
-body{background:#000;font-family:'Georgia',serif;}
-canvas{display:block;cursor:none;}
-#ui{position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:10;}
-#crosshair{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);color:#fff;font-size:24px;text-shadow:0 0 3px #000;z-index:20;}
-#hotbar{position:fixed;bottom:10px;left:50%;transform:translateX(-50%);display:flex;gap:2px;z-index:20;}
-.slot{width:48px;height:48px;border:2px solid #555;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;position:relative;}
-.slot.active{border-color:#fff;background:rgba(50,50,50,0.8);}
-.slot canvas{width:40px;height:40px;image-rendering:pixelated;}
-.slot .count{position:absolute;bottom:1px;right:3px;color:#fff;font-size:11px;text-shadow:1px 1px #000;}
-#info{position:fixed;top:10px;left:10px;color:#fff;font-size:13px;text-shadow:1px 1px #000;z-index:20;line-height:1.6;}
-#loading{position:fixed;top:0;left:0;width:100%;height:100%;background:#1a0a00;display:flex;align-items:center;justify-content:center;flex-direction:column;z-index:100;color:#c4a265;font-family:'Georgia',serif;}
-#loading h1{font-size:36px;margin-bottom:20px;text-shadow:0 0 20px #8b6914;}
-#loading .bar{width:300px;height:8px;background:#333;border:1px solid #665;border-radius:4px;overflow:hidden;}
-#loading .fill{height:100%;background:linear-gradient(90deg,#8b6914,#c4a265);width:0%;transition:width 0.3s;}
-#loading .tip{margin-top:15px;font-size:14px;font-style:italic;color:#886;}
-</style>
+    <meta charset="UTF-8">
+    <title>Medieval Voxel World</title>
+    <style>
+        *{margin:0;padding:0;overflow:hidden;}
+        body{background:#000;font-family:'Georgia',serif;}
+        canvas{display:block;cursor:none;}
+        #ui{position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:10;}
+        #crosshair{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);color:#fff;font-size:24px;text-shadow:0 0 3px #000;z-index:20;}
+        #hotbar{position:fixed;bottom:10px;left:50%;transform:translateX(-50%);display:flex;gap:2px;z-index:20;}
+        .slot{width:48px;height:48px;border:2px solid #555;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;position:relative;}
+        .slot.active{border-color:#fff;background:rgba(50,50,50,0.8);}
+        .slot canvas{width:40px;height:40px;image-rendering:pixelated;}
+        .slot .count{position:absolute;bottom:1px;right:3px;color:#fff;font-size:11px;text-shadow:1px 1px #000;}
+        #info{position:fixed;top:10px;left:10px;color:#fff;font-size:13px;text-shadow:1px 1px #000;z-index:20;line-height:1.6;}
+        #loading{position:fixed;top:0;left:0;width:100%;height:100%;background:#1a0a00;display:flex;align-items:center;justify-content:center;flex-direction:column;z-index:100;color:#c4a265;font-family:'Georgia',serif;}
+        #loading h1{font-size:36px;margin-bottom:20px;text-shadow:0 0 20px #8b6914;}
+        #loading .bar{width:300px;height:8px;background:#333;border:1px solid #665;border-radius:4px;overflow:hidden;}
+        #loading .fill{height:100%;background:linear-gradient(90deg,#8b6914,#c4a265);width:0;transition:width 0.3s;}
+        #loading .tip{margin-top:15px;font-size:14px;font-style:italic;color:#886;}
+    </style>
 </head>
 <body>
 <div id="loading">
-<h1>⚔ Medieval Voxel World ⚔</h1>
-<div class="bar"><div class="fill" id="loadFill"></div></div>
-<div class="tip" id="loadTip">Forging the world...</div>
+    <h1>⚔ Medieval Voxel World ⚔</h1>
+    <div class="bar"><div class="fill" id="loadFill"></div></div>
+    <div class="tip" id="loadTip">Forging the world...</div>
 </div>
 <canvas id="gameCanvas"></canvas>
 <div id="crosshair">✦</div>
@@ -34,541 +34,401 @@ canvas{display:block;cursor:none;}
 <div id="hotbar"></div>
 
 <script>
-const canvas = document.getElementById('gameCanvas');
-const gl = canvas.getContext('webgl', {antialias: false, alpha: false});
-const info = document.getElementById('info');
+    const canvas = document.getElementById('gameCanvas');
+    const gl = canvas.getContext('webgl', {antialias: false, alpha: false});
+    const info = document.getElementById('info');
 
-const CHUNK_SIZE = 16;
-const CHUNK_HEIGHT = 64;
-const RENDER_DIST = 5;
-const WORLD_SEED = Math.random() * 65536 | 0;
-const GRAVITY = -22;
-const JUMP_VEL = 8.5;
-const PLAYER_HEIGHT = 1.7;
-const PLAYER_WIDTH = 0.3;
-const REACH = 5;
+    const CHUNK_SIZE = 16;
+    const CHUNK_HEIGHT = 64;
+    const RENDER_DIST = 5;
+    const WORLD_SEED = Math.random() * 65536 | 0;
+    const GRAVITY = -22;
+    const JUMP_VEL = 8.5;
+    const PLAYER_HEIGHT = 1.7;
+    const PLAYER_WIDTH = 0.35;
+    const PLAYER_EYE_OFFSET = 1.5;
+    const NEAR_PLANE = 0.05;
+    const REACH = 5;
+    const SORT_THRESHOLD = 2.0;
 
-const BLOCK = {
-  AIR:0, GRASS:1, DIRT:2, STONE:3, WOOD:4, LEAVES:5,
-  SAND:6, WATER:7, COBBLE:8, PLANKS:9, COAL_ORE:10,
-  IRON_ORE:11, GOLD_ORE:12, BRICK:13, SNOW:14, GRAVEL:15,
-  TALL_GRASS:16, FLOWER_RED:17, FLOWER_YELLOW:18, MUSHROOM:19,
-  BEDROCK:20, GLASS:21, TORCH:22, BOOKSHELF:23
-};
+    const BLOCK = {
+        AIR:0, GRASS:1, DIRT:2, STONE:3, WOOD:4, LEAVES:5,
+        SAND:6, WATER:7, COBBLE:8, PLANKS:9, COAL_ORE:10,
+        IRON_ORE:11, GOLD_ORE:12, BRICK:13, SNOW:14, GRAVEL:15,
+        TALL_GRASS:16, FLOWER_RED:17, FLOWER_YELLOW:18, MUSHROOM:19,
+        BEDROCK:20, GLASS:21, TORCH:22, BOOKSHELF:23
+    };
 
-const BLOCK_NAMES = {};
-for(let k in BLOCK) BLOCK_NAMES[BLOCK[k]] = k;
+    const BLOCK_NAMES = {};
+    for(let k in BLOCK) BLOCK_NAMES[BLOCK[k]] = k;
 
-const BLOCK_HARDNESS = {
-  [BLOCK.GRASS]:1,[BLOCK.DIRT]:0.8,[BLOCK.STONE]:3,[BLOCK.WOOD]:2,
-  [BLOCK.LEAVES]:0.3,[BLOCK.SAND]:0.8,[BLOCK.COBBLE]:3,[BLOCK.PLANKS]:2,
-  [BLOCK.COAL_ORE]:3.5,[BLOCK.IRON_ORE]:4,[BLOCK.GOLD_ORE]:4.5,
-  [BLOCK.BRICK]:3,[BLOCK.SNOW]:0.5,[BLOCK.GRAVEL]:1,[BLOCK.GLASS]:0.5,
-  [BLOCK.BOOKSHELF]:1.5,[BLOCK.BEDROCK]:999,[BLOCK.TORCH]:0.1
-};
+    const BLOCK_HARDNESS = {
+        [BLOCK.GRASS]:1,[BLOCK.DIRT]:0.8,[BLOCK.STONE]:3,[BLOCK.WOOD]:2,
+        [BLOCK.LEAVES]:0.3,[BLOCK.SAND]:0.8,[BLOCK.COBBLE]:3,[BLOCK.PLANKS]:2,
+        [BLOCK.COAL_ORE]:3.5,[BLOCK.IRON_ORE]:4,[BLOCK.GOLD_ORE]:4.5,
+        [BLOCK.BRICK]:3,[BLOCK.SNOW]:0.5,[BLOCK.GRAVEL]:1,[BLOCK.GLASS]:0.5,
+        [BLOCK.BOOKSHELF]:1.5,[BLOCK.BEDROCK]:999,[BLOCK.TORCH]:0.1
+    };
 
-const TRANSPARENT = new Set([BLOCK.AIR, BLOCK.WATER, BLOCK.GLASS,
-  BLOCK.TALL_GRASS, BLOCK.FLOWER_RED, BLOCK.FLOWER_YELLOW, BLOCK.MUSHROOM, BLOCK.TORCH]);
-const NON_SOLID = new Set([BLOCK.AIR, BLOCK.WATER, BLOCK.TALL_GRASS,
-  BLOCK.FLOWER_RED, BLOCK.FLOWER_YELLOW, BLOCK.MUSHROOM, BLOCK.TORCH]);
-const CROSS_BLOCKS = new Set([BLOCK.TALL_GRASS, BLOCK.FLOWER_RED, BLOCK.FLOWER_YELLOW, BLOCK.MUSHROOM, BLOCK.TORCH]);
-const ALPHA_BLOCKS = new Set([BLOCK.WATER, BLOCK.GLASS]);
+    const TRANSPARENT = new Set([BLOCK.AIR, BLOCK.WATER, BLOCK.GLASS,
+        BLOCK.TALL_GRASS, BLOCK.FLOWER_RED, BLOCK.FLOWER_YELLOW, BLOCK.MUSHROOM, BLOCK.TORCH, BLOCK.LEAVES]);
+    const NON_SOLID = new Set([BLOCK.AIR, BLOCK.WATER, BLOCK.TALL_GRASS,
+        BLOCK.FLOWER_RED, BLOCK.FLOWER_YELLOW, BLOCK.MUSHROOM, BLOCK.TORCH]);
+    const CROSS_BLOCKS = new Set([BLOCK.TALL_GRASS, BLOCK.FLOWER_RED, BLOCK.FLOWER_YELLOW, BLOCK.MUSHROOM, BLOCK.TORCH]);
+    const ALPHA_BLOCKS = new Set([BLOCK.WATER, BLOCK.GLASS]);
 
-class PerlinNoise {
-  constructor(seed) {
-    this.p = new Uint8Array(512);
-    let perm = new Uint8Array(256);
-    for(let i=0;i<256;i++) perm[i]=i;
-    let s = seed;
-    for(let i=255;i>0;i--){
-      s = (s*16807+0)%2147483647;
-      let j = s % (i+1);
-      [perm[i],perm[j]] = [perm[j],perm[i]];
+    let maxEnabledAttrib = 0;
+    function disableAllAttribs() {
+        for(let i = 0; i <= maxEnabledAttrib; i++) gl.disableVertexAttribArray(i);
+        maxEnabledAttrib = 0;
     }
-    for(let i=0;i<512;i++) this.p[i] = perm[i&255];
-  }
-  fade(t){return t*t*t*(t*(t*6-15)+10);}
-  lerp(a,b,t){return a+t*(b-a);}
-  grad(hash,x,y,z){
-    let h=hash&15;
-    let u=h<8?x:y, v=h<4?y:h===12||h===14?x:z;
-    return((h&1)?-u:u)+((h&2)?-v:v);
-  }
-  noise3D(x,y,z){
-    let X=Math.floor(x)&255,Y=Math.floor(y)&255,Z=Math.floor(z)&255;
-    x-=Math.floor(x);y-=Math.floor(y);z-=Math.floor(z);
-    let u=this.fade(x),v=this.fade(y),w=this.fade(z);
-    let p=this.p;
-    let A=p[X]+Y,AA=p[A]+Z,AB=p[A+1]+Z;
-    let B=p[X+1]+Y,BA=p[B]+Z,BB=p[B+1]+Z;
-    return this.lerp(
-      this.lerp(this.lerp(this.grad(p[AA],x,y,z),this.grad(p[BA],x-1,y,z),u),
-                this.lerp(this.grad(p[AB],x,y-1,z),this.grad(p[BB],x-1,y-1,z),u),v),
-      this.lerp(this.lerp(this.grad(p[AA+1],x,y,z-1),this.grad(p[BA+1],x-1,y,z-1),u),
-                this.lerp(this.grad(p[AB+1],x,y-1,z-1),this.grad(p[BB+1],x-1,y-1,z-1),u),v),w);
-  }
-  fbm(x,y,z,octaves=4,lac=2,gain=0.5){
-    let val=0,amp=1,freq=1,max=0;
-    for(let i=0;i<octaves;i++){
-      val+=this.noise3D(x*freq,y*freq,z*freq)*amp;
-      max+=amp;amp*=gain;freq*=lac;
+    function enableAttrib(loc) {
+        if(loc >= 0) { gl.enableVertexAttribArray(loc); if(loc > maxEnabledAttrib) maxEnabledAttrib = loc; }
     }
-    return val/max;
-  }
-  noise2D(x,y){return this.noise3D(x,y,0);}
-  fbm2D(x,y,oct=4){return this.fbm(x,y,0,oct);}
-}
 
-const noise = new PerlinNoise(WORLD_SEED);
-const noise2 = new PerlinNoise(WORLD_SEED+1337);
-const noise3 = new PerlinNoise(WORLD_SEED+42069);
-
-const TEX_SIZE = 16;
-let textureAtlas;
-
-function generateBlockTexture(blockType, face) {
-  let pixels = new Uint8Array(TEX_SIZE * TEX_SIZE * 4);
-
-  function setPixel(x,y,col) {
-    if(x<0||x>=TEX_SIZE||y<0||y>=TEX_SIZE) return;
-    let i = (y*TEX_SIZE+x)*4;
-    pixels[i]=Math.max(0,Math.min(255,col[0]|0));
-    pixels[i+1]=Math.max(0,Math.min(255,col[1]|0));
-    pixels[i+2]=Math.max(0,Math.min(255,col[2]|0));
-    pixels[i+3]=col[3]!==undefined?Math.max(0,Math.min(255,col[3]|0)):255;
-  }
-
-  function getPixel(x,y) {
-    if(x<0||x>=TEX_SIZE||y<0||y>=TEX_SIZE) return [0,0,0,255];
-    let i=(y*TEX_SIZE+x)*4;
-    return [pixels[i],pixels[i+1],pixels[i+2],pixels[i+3]];
-  }
-
-  function fill(col) {
-    for(let y=0;y<TEX_SIZE;y++)for(let x=0;x<TEX_SIZE;x++) setPixel(x,y,col);
-  }
-
-  function addNoise(amount, seed=0) {
-    for(let y=0;y<TEX_SIZE;y++) for(let x=0;x<TEX_SIZE;x++) {
-      let n = (noise.noise2D((x+seed*100)*0.3,(y+seed*50)*0.3)*0.5+0.5)*amount - amount/2;
-      let c = getPixel(x,y);
-      setPixel(x,y,[c[0]+n, c[1]+n, c[2]+n, c[3]]);
-    }
-  }
-
-  function hashRand(x,y,s=0){
-    let h = (x*374761393+y*668265263+s*1274126177)^(x*y*s+12345);
-    h = ((h>>16)^h)*0x45d9f3b; h = ((h>>16)^h)*0x45d9f3b; h = (h>>16)^h;
-    return (h&0xFFFF)/0xFFFF;
-  }
-
-  switch(blockType) {
-    case BLOCK.GRASS:
-      if(face === 'top') {
-        for(let y=0;y<TEX_SIZE;y++) for(let x=0;x<TEX_SIZE;x++) {
-          let n = hashRand(x,y,1);
-          let g = 80 + n*50, r = 40 + n*20, b = 20 + n*15;
-          if(hashRand(x,y,7)<0.15) { g+=30; r-=10; }
-          setPixel(x,y,[r,g,b]);
-        }
-      } else if(face === 'bottom') {
-        for(let y=0;y<TEX_SIZE;y++) for(let x=0;x<TEX_SIZE;x++) {
-          let n = hashRand(x,y,2);
-          setPixel(x,y,[110+n*30, 80+n*20, 50+n*15]);
-        }
-      } else {
-        for(let y=0;y<TEX_SIZE;y++) for(let x=0;x<TEX_SIZE;x++) {
-          let n = hashRand(x,y,3);
-          if(y < 3) {
-            let g = 70+n*50;
-            setPixel(x,y,[40+n*15, g, 20+n*10]);
-          } else {
-            setPixel(x,y,[110+n*30, 80+n*20, 50+n*15]);
-          }
-        }
-      }
-      addNoise(15,blockType);
-      break;
-    case BLOCK.DIRT:
-      for(let y=0;y<TEX_SIZE;y++) for(let x=0;x<TEX_SIZE;x++) {
-        let n = hashRand(x,y,4);
-        setPixel(x,y,[110+n*30, 80+n*20, 50+n*15]);
-        if(hashRand(x,y,99)<0.08) setPixel(x,y,[90,65,35]);
-      }
-      addNoise(12,1);
-      break;
-    case BLOCK.STONE:
-      for(let y=0;y<TEX_SIZE;y++) for(let x=0;x<TEX_SIZE;x++) {
-        let n = hashRand(x,y,5);
-        let n2 = noise.noise2D(x*0.4,y*0.4)*0.5+0.5;
-        let v = 100 + n*30 + n2*25;
-        setPixel(x,y,[v,v-2,v-5]);
-      }
-      for(let i=0;i<3;i++){
-        let sx=hashRand(i,0,55)*14+1|0, sy=hashRand(i,1,55)*14+1|0;
-        for(let j=0;j<4;j++){
-          setPixel(sx,sy,[70,68,65]);
-          sx+=(hashRand(i,j,66)*3-1)|0;
-          sy+=(hashRand(i,j,77)*3-1)|0;
-        }
-      }
-      addNoise(10,2);
-      break;
-    case BLOCK.WOOD:
-      if(face === 'top' || face === 'bottom') {
-        let cx=8,cy=8;
-        for(let y=0;y<TEX_SIZE;y++) for(let x=0;x<TEX_SIZE;x++) {
-          let d = Math.sqrt((x-cx)**2+(y-cy)**2);
-          let ring = Math.sin(d*1.5)*0.5+0.5;
-          let v = 130+ring*40;
-          setPixel(x,y,[v, v*0.7, v*0.4]);
-        }
-      } else {
-        for(let y=0;y<TEX_SIZE;y++) for(let x=0;x<TEX_SIZE;x++) {
-          let bark = Math.sin(x*0.8+noise.noise2D(x*0.3,y*0.2)*3)*0.5+0.5;
-          let n = hashRand(x,y,8);
-          let v = 100 + bark*35 + n*15;
-          setPixel(x,y,[v, v*0.65, v*0.35]);
-        }
-        for(let x=0;x<TEX_SIZE;x+=3+((hashRand(x,0,11)*2)|0)) {
-          for(let y=0;y<TEX_SIZE;y++) {
-            if(hashRand(x,y,12)<0.4) {
-              let c=getPixel(x,y);
-              setPixel(x,y,[c[0]*0.8,c[1]*0.8,c[2]*0.8,c[3]]);
+    class PerlinNoise {
+        constructor(seed) {
+            this.p = new Uint8Array(512);
+            let perm = new Uint8Array(256);
+            for(let i=0;i<256;i++) perm[i]=i;
+            let s = seed;
+            for(let i=255;i>0;i--){
+                s = (s * 16807)%2147483647;
+                let j = s % (i+1);
+                [perm[i],perm[j]] = [perm[j],perm[i]];
             }
-          }
+            for(let i=0;i<512;i++) this.p[i] = perm[i&255];
         }
-      }
-      addNoise(8,3);
-      break;
-    case BLOCK.LEAVES:
-      for(let y=0;y<TEX_SIZE;y++) for(let x=0;x<TEX_SIZE;x++) {
-        let n = hashRand(x,y,9);
-        let n2 = noise.noise2D(x*0.5,y*0.5)*0.5+0.5;
-        let g = 60 + n*40 + n2*30;
-        setPixel(x,y,[25+n*20, g, 20+n*10, 255]);
-      }
-      addNoise(15,4);
-      break;
-    case BLOCK.SAND:
-      for(let y=0;y<TEX_SIZE;y++) for(let x=0;x<TEX_SIZE;x++) {
-        let n = hashRand(x,y,10);
-        let v = 200+n*40;
-        setPixel(x,y,[v, v*0.9, v*0.6]);
-        if(hashRand(x,y,44)<0.05) setPixel(x,y,[180,170,110]);
-      }
-      addNoise(10,5);
-      break;
-    case BLOCK.WATER:
-      for(let y=0;y<TEX_SIZE;y++) for(let x=0;x<TEX_SIZE;x++) {
-        let n = noise.noise2D(x*0.3+blockType,y*0.3)*0.5+0.5;
-        setPixel(x,y,[20+n*20, 50+n*30, 140+n*40, 160]);
-      }
-      break;
-    case BLOCK.COBBLE:
-      for(let y=0;y<TEX_SIZE;y++) for(let x=0;x<TEX_SIZE;x++) {
-        let n = hashRand(x,y,13); let v = 90+n*40;
-        setPixel(x,y,[v,v-3,v-5]);
-      }
-      for(let i=0;i<6;i++){
-        let bx=hashRand(i,0,14)*14+1|0, by=hashRand(i,1,14)*14+1|0;
-        let s=hashRand(i,2,14)*3+2|0;
-        for(let dy=-s;dy<=s;dy++) for(let dx=-s;dx<=s;dx++) {
-          if(dx*dx+dy*dy<s*s) {
-            let px=bx+dx,py=by+dy;
-            let c=getPixel(px,py); let sh=hashRand(i,3,14)*20-10;
-            setPixel(px,py,[c[0]+sh,c[1]+sh,c[2]+sh,c[3]]);
-          }
+        fade(t){return t*t*t*(t*(t*6-15)+10);}
+        lerp(a,b,t){return a+t*(b-a);}
+        grad(hash,x,y,z){
+            let h=hash&15;
+            let u=h<8?x:y, v=h<4?y:h===12||h===14?x:z;
+            return((h&1)?-u:u)+((h&2)?-v:v);
         }
-        for(let a=0;a<Math.PI*2;a+=0.3){
-          let px=bx+Math.cos(a)*s|0, py=by+Math.sin(a)*s|0;
-          let c=getPixel(px,py);
-          setPixel(px,py,[c[0]*0.7,c[1]*0.7,c[2]*0.7,c[3]]);
+        noise3D(x,y,z){
+            let X=Math.floor(x)&255,Y=Math.floor(y)&255,Z=Math.floor(z)&255;
+            x-=Math.floor(x);y-=Math.floor(y);z-=Math.floor(z);
+            let u=this.fade(x),v=this.fade(y),w=this.fade(z);
+            let p=this.p;
+            let A=p[X]+Y,AA=p[A]+Z,AB=p[A+1]+Z;
+            let B=p[X+1]+Y,BA=p[B]+Z,BB=p[B+1]+Z;
+            return this.lerp(
+                this.lerp(this.lerp(this.grad(p[AA],x,y,z),this.grad(p[BA],x-1,y,z),u),
+                    this.lerp(this.grad(p[AB],x,y-1,z),this.grad(p[BB],x-1,y-1,z),u),v),
+                this.lerp(this.lerp(this.grad(p[AA+1],x,y,z-1),this.grad(p[BA+1],x-1,y,z-1),u),
+                    this.lerp(this.grad(p[AB+1],x,y-1,z-1),this.grad(p[BB+1],x-1,y-1,z-1),u),v),w);
         }
-      }
-      addNoise(8,6);
-      break;
-    case BLOCK.PLANKS:
-      for(let y=0;y<TEX_SIZE;y++) for(let x=0;x<TEX_SIZE;x++) {
-        let plank = (y/4|0); let n = hashRand(x,y,15);
-        let v = 160+n*25+(plank%2)*10;
-        let line = (y%4===0)?0.7:1;
-        setPixel(x,y,[v*line, v*0.72*line, v*0.42*line]);
-      }
-      for(let p=0;p<4;p++){
-        let nx=hashRand(p,0,16)*12+2|0, ny=p*4+2;
-        setPixel(nx,ny,[60,55,50]);
-      }
-      addNoise(8,7);
-      break;
-    case BLOCK.COAL_ORE:
-      for(let y=0;y<TEX_SIZE;y++) for(let x=0;x<TEX_SIZE;x++) {
-        let n = hashRand(x,y,5); let v = 100+n*30;
-        setPixel(x,y,[v,v-2,v-5]);
-      }
-      for(let i=0;i<5;i++){
-        let cx=hashRand(i,0,17)*12+2|0, cy=hashRand(i,1,17)*12+2|0;
-        for(let dy=-1;dy<=1;dy++) for(let dx=-1;dx<=1;dx++){
-          if(hashRand(i+dx,dy,17)<0.7) setPixel(cx+dx,cy+dy,[25+hashRand(i,dx+dy,18)*15,25,25]);
-        }
-      }
-      addNoise(8,8);
-      break;
-    case BLOCK.IRON_ORE:
-      for(let y=0;y<TEX_SIZE;y++) for(let x=0;x<TEX_SIZE;x++) {
-        let n = hashRand(x,y,5); let v = 100+n*30;
-        setPixel(x,y,[v,v-2,v-5]);
-      }
-      for(let i=0;i<4;i++){
-        let cx=hashRand(i,0,19)*12+2|0, cy=hashRand(i,1,19)*12+2|0;
-        for(let dy=-1;dy<=1;dy++) for(let dx=-1;dx<=1;dx++){
-          if(hashRand(i+dx,dy,19)<0.65) setPixel(cx+dx,cy+dy,[180+hashRand(i,0,20)*40,140+hashRand(i,1,20)*30,120]);
-        }
-      }
-      addNoise(8,9);
-      break;
-    case BLOCK.GOLD_ORE:
-      for(let y=0;y<TEX_SIZE;y++) for(let x=0;x<TEX_SIZE;x++) {
-        let n = hashRand(x,y,5); let v = 100+n*30;
-        setPixel(x,y,[v,v-2,v-5]);
-      }
-      for(let i=0;i<3;i++){
-        let cx=hashRand(i,0,21)*12+2|0, cy=hashRand(i,1,21)*12+2|0;
-        for(let dy=-1;dy<=1;dy++) for(let dx=-1;dx<=1;dx++){
-          if(hashRand(i+dx,dy,21)<0.6) setPixel(cx+dx,cy+dy,[220+hashRand(i,0,22)*35,190+hashRand(i,1,22)*30,40]);
-        }
-      }
-      addNoise(8,10);
-      break;
-    case BLOCK.BRICK:
-      fill([140,75,55]);
-      for(let y=0;y<TEX_SIZE;y++) for(let x=0;x<TEX_SIZE;x++) {
-        let n = hashRand(x,y,23);
-        let row = y/4|0; let off = (row%2)*4;
-        if(y%4===0 || (x+off)%8===0) {
-          setPixel(x,y,[170+n*20,165+n*15,150+n*10]);
-        } else {
-          let v = 140+n*30;
-          setPixel(x,y,[v, v*0.5, v*0.35]);
-        }
-      }
-      addNoise(10,11);
-      break;
-    case BLOCK.SNOW:
-      for(let y=0;y<TEX_SIZE;y++) for(let x=0;x<TEX_SIZE;x++) {
-        let n = hashRand(x,y,24); let v = 230+n*25;
-        setPixel(x,y,[v,v,Math.min(255,v+5)]);
-      }
-      addNoise(5,12);
-      break;
-    case BLOCK.GRAVEL:
-      for(let y=0;y<TEX_SIZE;y++) for(let x=0;x<TEX_SIZE;x++) {
-        let n = hashRand(x,y,25); let v = 100+n*50;
-        setPixel(x,y,[v,v-3,v-8]);
-      }
-      addNoise(15,13);
-      break;
-    case BLOCK.GLASS:
-      fill([200,220,235,60]);
-      for(let i=0;i<TEX_SIZE;i++){
-        setPixel(i,0,[150,160,170,200]); setPixel(i,TEX_SIZE-1,[150,160,170,200]);
-        setPixel(0,i,[150,160,170,200]); setPixel(TEX_SIZE-1,i,[150,160,170,200]);
-      }
-      for(let i=0;i<5;i++){
-        setPixel(2+i,2,[255,255,255,80]);
-        setPixel(2,2+i,[255,255,255,60]);
-      }
-      break;
-    case BLOCK.BEDROCK:
-      for(let y=0;y<TEX_SIZE;y++) for(let x=0;x<TEX_SIZE;x++) {
-        let n = hashRand(x,y,27); let v = 30+n*30;
-        setPixel(x,y,[v,v,v]);
-      }
-      addNoise(10,14);
-      break;
-    case BLOCK.BOOKSHELF:
-      if(face === 'top' || face === 'bottom') {
-        for(let y=0;y<TEX_SIZE;y++) for(let x=0;x<TEX_SIZE;x++) {
-          let n = hashRand(x,y,15); let v = 160+n*25;
-          setPixel(x,y,[v, v*0.72, v*0.42]);
-        }
-      } else {
-        fill([140,110,70]);
-        let bx = 1;
-        while(bx < TEX_SIZE-1) {
-          let bw = 1+(hashRand(bx,0,28)*2|0);
-          let colors = [
-            [120+hashRand(bx,1,28)*60, 30+hashRand(bx,2,28)*40, 30],
-            [30, 60+hashRand(bx,3,28)*60, 30+hashRand(bx,4,28)*40],
-            [30+hashRand(bx,5,28)*40, 30, 100+hashRand(bx,6,28)*60],
-            [130+hashRand(bx,7,28)*40, 100+hashRand(bx,8,28)*30, 30],
-          ];
-          let col = colors[hashRand(bx,9,28)*4|0];
-          for(let shelf=0;shelf<2;shelf++){
-            let sy = shelf*8+1;
-            for(let dy=0;dy<6;dy++) for(let dx=0;dx<bw;dx++){
-              setPixel(bx+dx, sy+dy, col);
+        fbm(x,y,z,octaves=4,lac=2,gain=0.5){
+            let val=0,amp=1,freq=1,max=0;
+            for(let i=0;i<octaves;i++){
+                val+=this.noise3D(x*freq,y*freq,z*freq)*amp;
+                max+=amp;amp*=gain;freq*=lac;
             }
-          }
-          bx += bw+1;
+            return val/max;
         }
-        for(let x=0;x<TEX_SIZE;x++){
-          setPixel(x,0,[100,75,40]); setPixel(x,8,[100,75,40]);
-          setPixel(x,7,[90,65,35]); setPixel(x,15,[100,75,40]);
-        }
-      }
-      addNoise(8,15);
-      break;
-    case BLOCK.TALL_GRASS:
-      for(let s=0;s<3;s++){
-        let bx = 4+s*4+(hashRand(s,0,29)*3-1|0);
-        for(let y=TEX_SIZE-1;y>=4;y--){
-          let sway = Math.sin((TEX_SIZE-y)*0.3+s)*1.5;
-          let px = bx+sway|0;
-          let n = hashRand(px,y,30);
-          setPixel(px,y,[40+n*20, 90+n*50, 20+n*15, 255]);
-          if(px+1<TEX_SIZE) setPixel(px+1,y,[35+n*15, 80+n*40, 18+n*10, 200]);
-        }
-      }
-      break;
-    case BLOCK.FLOWER_RED:
-      for(let y=8;y<TEX_SIZE;y++){
-        setPixel(7,y,[30,80,20,255]); setPixel(8,y,[30,80,20,255]);
-      }
-      let rc=[[7,5],[9,5],[6,6],[10,6],[7,7],[9,7],[8,4],[8,6]];
-      rc.forEach(([x,y])=>setPixel(x,y,[200+hashRand(x,y,71)*55,20,20,255]));
-      setPixel(8,5,[255,220,50,255]);
-      break;
-    case BLOCK.FLOWER_YELLOW:
-      for(let y=8;y<TEX_SIZE;y++){
-        setPixel(7,y,[30,80,20,255]); setPixel(8,y,[30,80,20,255]);
-      }
-      let yc=[[7,5],[9,5],[6,6],[10,6],[7,7],[9,7],[8,4],[8,6]];
-      yc.forEach(([x,y])=>setPixel(x,y,[240,210+hashRand(x,y,72)*40,20,255]));
-      setPixel(8,5,[180,120,20,255]);
-      break;
-    case BLOCK.MUSHROOM:
-      for(let y=10;y<TEX_SIZE;y++){setPixel(7,y,[200,190,170,255]);setPixel(8,y,[200,190,170,255]);}
-      for(let dy=-3;dy<=0;dy++) for(let dx=-3;dx<=3;dx++){
-        if(dx*dx+dy*dy<=10){
-          setPixel(8+dx,8+dy,[180,30,30,255]);
-          if(hashRand(dx+3,dy+3,31)<0.3) setPixel(8+dx,8+dy,[240,240,230,255]);
-        }
-      }
-      break;
-    case BLOCK.TORCH:
-      for(let y=5;y<TEX_SIZE;y++){setPixel(7,y,[140,110,60,255]);setPixel(8,y,[140,110,60,255]);}
-      setPixel(7,3,[255,200,50,255]);setPixel(8,3,[255,200,50,255]);
-      setPixel(7,4,[255,150,30,255]);setPixel(8,4,[255,150,30,255]);
-      setPixel(8,2,[255,230,100,200]);
-      break;
-    default:
-      fill([255,0,255]);
-      break;
-  }
-  return pixels;
-}
-
-function buildTextureAtlas() {
-  let blockTypes = Object.values(BLOCK).filter(v=>v>0);
-  let cols = 3;
-  let rows = blockTypes.length;
-  let atlasW = cols * TEX_SIZE;
-  let atlasH = rows * TEX_SIZE;
-  let pw = 1; while(pw<atlasW) pw*=2;
-  let ph = 1; while(ph<atlasH) ph*=2;
-  let atlas = new Uint8Array(pw * ph * 4);
-  let uvMap = {};
-
-  for(let i = 0; i < blockTypes.length; i++) {
-    let bt = blockTypes[i];
-    let faces = ['top','side','bottom'];
-    uvMap[bt] = {};
-    for(let f = 0; f < 3; f++) {
-      let pixels = generateBlockTexture(bt, faces[f]);
-      let ox = f * TEX_SIZE;
-      let oy = i * TEX_SIZE;
-      // In OpenGL, texImage2D row 0 = bottom of texture (V=0).
-      // Our pixel data row 0 = top of image visually.
-      // So we flip Y when copying into atlas: pixel row y goes to atlas row (TEX_SIZE-1-y) relative to oy.
-      for(let y = 0; y < TEX_SIZE; y++) {
-        for(let x = 0; x < TEX_SIZE; x++) {
-          let si = (y * TEX_SIZE + x) * 4;
-          let atlasY = oy + (TEX_SIZE - 1 - y); // flip
-          let di = (atlasY * pw + (ox + x)) * 4;
-          atlas[di]   = pixels[si];
-          atlas[di+1] = pixels[si+1];
-          atlas[di+2] = pixels[si+2];
-          atlas[di+3] = pixels[si+3];
-        }
-      }
-      // After flipping, V=0 (oy/ph) = bottom of subtexture = bottom of image = what was pixel row 15
-      // V=vh (oy+TEX_SIZE)/ph = top of subtexture = top of image = what was pixel row 0
-      uvMap[bt][faces[f]] = {
-        u: ox/pw, v: oy/ph,
-        uw: TEX_SIZE/pw, vh: TEX_SIZE/ph
-      };
+        noise2D(x,y){return this.noise3D(x,y,0);}
+        fbm2D(x,y,oct=4){return this.fbm(x,y,0,oct);}
     }
-  }
-  return { data: atlas, width: pw, height: ph, uvMap };
-}
 
-let audioCtx;
-function initAudio() { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
+    const noise  = new PerlinNoise(WORLD_SEED);
+    const noise2 = new PerlinNoise(WORLD_SEED+1337);
+    const noise3 = new PerlinNoise(WORLD_SEED+42069);
 
-function playSound(type, volume=0.3) {
-  if(!audioCtx) return;
-  try {
-    let gain = audioCtx.createGain();
-    gain.connect(audioCtx.destination);
-    let dur;
-    switch(type) {
-      case 'break': {
-        dur = 0.15;
-        let buf = audioCtx.createBuffer(1, audioCtx.sampleRate*dur|0, audioCtx.sampleRate);
-        let d = buf.getChannelData(0);
-        for(let i=0;i<d.length;i++) d[i]=(Math.random()*2-1)*Math.exp(-i/d.length*5);
-        let src = audioCtx.createBufferSource();
-        src.buffer = buf;
-        gain.gain.setValueAtTime(volume, audioCtx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime+dur);
-        src.connect(gain); src.start(); return;
-      }
-      case 'place': {
-        dur = 0.1;
-        let osc = audioCtx.createOscillator();
-        osc.type = 'square';
-        osc.frequency.setValueAtTime(200, audioCtx.currentTime);
-        osc.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime+dur);
-        gain.gain.setValueAtTime(volume*0.5, audioCtx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime+dur);
-        osc.connect(gain); osc.start(); osc.stop(audioCtx.currentTime+dur); return;
-      }
-      case 'step': {
-        dur = 0.08;
-        let buf = audioCtx.createBuffer(1, audioCtx.sampleRate*dur|0, audioCtx.sampleRate);
-        let d = buf.getChannelData(0);
-        let f = 100+Math.random()*100;
-        for(let i=0;i<d.length;i++) d[i]=(Math.random()*0.5+Math.sin(i/audioCtx.sampleRate*f*6.28)*0.5)*Math.exp(-i/d.length*8);
-        let src = audioCtx.createBufferSource();
-        src.buffer = buf;
-        gain.gain.setValueAtTime(volume*0.2, audioCtx.currentTime);
-        src.connect(gain); src.start(); return;
-      }
-      case 'hit': {
-        dur = 0.05;
-        let osc = audioCtx.createOscillator();
-        osc.type = 'sawtooth';
-        osc.frequency.setValueAtTime(400+Math.random()*200, audioCtx.currentTime);
-        gain.gain.setValueAtTime(volume*0.3, audioCtx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime+dur);
-        osc.connect(gain); osc.start(); osc.stop(audioCtx.currentTime+dur); return;
-      }
+    const TEX_SIZE = 16;
+    let textureAtlas;
+
+    function generateBlockTexture(blockType, face) {
+        let pixels = new Uint8Array(TEX_SIZE * TEX_SIZE * 4);
+        function setPixel(x,y,col) {
+            if(x<0||x>=TEX_SIZE||y<0||y>=TEX_SIZE) return;
+            let i=(y*TEX_SIZE+x)*4;
+            pixels[i]  =Math.max(0,Math.min(255,col[0]|0));
+            pixels[i+1]=Math.max(0,Math.min(255,col[1]|0));
+            pixels[i+2]=Math.max(0,Math.min(255,col[2]|0));
+            pixels[i+3]=col[3]!==undefined?Math.max(0,Math.min(255,col[3]|0)):255;
+        }
+        function getPixel(x,y) {
+            if(x<0||x>=TEX_SIZE||y<0||y>=TEX_SIZE) return [0,0,0,255];
+            let i=(y*TEX_SIZE+x)*4;
+            return [pixels[i],pixels[i+1],pixels[i+2],pixels[i+3]];
+        }
+        function fill(col) {
+            for(let y=0;y<TEX_SIZE;y++) for(let x=0;x<TEX_SIZE;x++) setPixel(x,y,col);
+        }
+        function addNoise(amount, seed=0) {
+            for(let y=0;y<TEX_SIZE;y++) for(let x=0;x<TEX_SIZE;x++) {
+                let n=(noise.noise2D((x+seed*100)*0.3,(y+seed*50)*0.3)*0.5+0.5)*amount-amount/2;
+                let c=getPixel(x,y);
+                setPixel(x,y,[c[0]+n,c[1]+n,c[2]+n,c[3]]);
+            }
+        }
+        function hashRand(x,y,s=0){
+            let h=(x*374761393+y*668265263+s*1274126177)^(x*y*s+12345);
+            h=((h>>16)^h)*0x45d9f3b; h=((h>>16)^h)*0x45d9f3b; h=(h>>16)^h;
+            return (h&0xFFFF)/0xFFFF;
+        }
+        switch(blockType) {
+            case BLOCK.GRASS:
+                if(face==='top') {
+                    for(let y=0;y<TEX_SIZE;y++) for(let x=0;x<TEX_SIZE;x++) {
+                        let n=hashRand(x,y,1);
+                        let g=80+n*50,r=40+n*20,b=20+n*15;
+                        if(hashRand(x,y,7)<0.15){g+=30;r-=10;}
+                        setPixel(x,y,[r,g,b]);
+                    }
+                } else if(face==='bottom') {
+                    for(let y=0;y<TEX_SIZE;y++) for(let x=0;x<TEX_SIZE;x++) {
+                        let n=hashRand(x,y,2);
+                        setPixel(x,y,[110+n*30,80+n*20,50+n*15]);
+                    }
+                } else {
+                    for(let y=0;y<TEX_SIZE;y++) for(let x=0;x<TEX_SIZE;x++) {
+                        let n=hashRand(x,y,3);
+                        if(y<3){let g=70+n*50;setPixel(x,y,[40+n*15,g,20+n*10]);}
+                        else setPixel(x,y,[110+n*30,80+n*20,50+n*15]);
+                    }
+                }
+                addNoise(15,blockType); break;
+            case BLOCK.DIRT:
+                for(let y=0;y<TEX_SIZE;y++) for(let x=0;x<TEX_SIZE;x++) {
+                    let n=hashRand(x,y,4);
+                    setPixel(x,y,[110+n*30,80+n*20,50+n*15]);
+                    if(hashRand(x,y,99)<0.08) setPixel(x,y,[90,65,35]);
+                }
+                addNoise(12,1); break;
+            case BLOCK.STONE:
+                for(let y=0;y<TEX_SIZE;y++) for(let x=0;x<TEX_SIZE;x++) {
+                    let n=hashRand(x,y,5);
+                    let n2=noise.noise2D(x*0.4,y*0.4)*0.5+0.5;
+                    let v=100+n*30+n2*25;
+                    setPixel(x,y,[v,v-2,v-5]);
+                }
+                for(let i=0;i<3;i++){
+                    let sx=hashRand(i,0,55)*14+1|0,sy=hashRand(i,1,55)*14+1|0;
+                    for(let j=0;j<4;j++){setPixel(sx,sy,[70,68,65]);sx+=(hashRand(i,j,66)*3-1)|0;sy+=(hashRand(i,j,77)*3-1)|0;}
+                }
+                addNoise(10,2); break;
+            case BLOCK.WOOD:
+                if(face==='top'||face==='bottom') {
+                    let cx=8,cy=8;
+                    for(let y=0;y<TEX_SIZE;y++) for(let x=0;x<TEX_SIZE;x++) {
+                        let d=Math.sqrt((x-cx)**2+(y-cy)**2);
+                        let ring=Math.sin(d*1.5)*0.5+0.5;
+                        let v=130+ring*40;
+                        setPixel(x,y,[v,v*0.7,v*0.4]);
+                    }
+                } else {
+                    for(let y=0;y<TEX_SIZE;y++) for(let x=0;x<TEX_SIZE;x++) {
+                        let bark=Math.sin(x*0.8+noise.noise2D(x*0.3,y*0.2)*3)*0.5+0.5;
+                        let n=hashRand(x,y,8);
+                        let v=100+bark*35+n*15;
+                        setPixel(x,y,[v,v*0.65,v*0.35]);
+                    }
+                    for(let x=0;x<TEX_SIZE;x+=3+((hashRand(x,0,11)*2)|0))
+                        for(let y=0;y<TEX_SIZE;y++)
+                            if(hashRand(x,y,12)<0.4){let c=getPixel(x,y);setPixel(x,y,[c[0]*0.8,c[1]*0.8,c[2]*0.8,c[3]]);}
+                }
+                addNoise(8,3); break;
+            case BLOCK.LEAVES:
+                for(let y=0;y<TEX_SIZE;y++) for(let x=0;x<TEX_SIZE;x++) {
+                    let n=hashRand(x,y,9);
+                    let n2=noise.noise2D(x*0.5,y*0.5)*0.5+0.5;
+                    let g=60+n*40+n2*30;
+                    setPixel(x,y,[25+n*20,g,20+n*10,255]);
+                }
+                addNoise(15,4); break;
+            case BLOCK.SAND:
+                for(let y=0;y<TEX_SIZE;y++) for(let x=0;x<TEX_SIZE;x++) {
+                    let n=hashRand(x,y,10);let v=200+n*40;
+                    setPixel(x,y,[v,v*0.9,v*0.6]);
+                    if(hashRand(x,y,44)<0.05) setPixel(x,y,[180,170,110]);
+                }
+                addNoise(10,5); break;
+            case BLOCK.WATER:
+                for(let y=0;y<TEX_SIZE;y++) for(let x=0;x<TEX_SIZE;x++) {
+                    let n=noise.noise2D(x*0.3+blockType,y*0.3)*0.5+0.5;
+                    setPixel(x,y,[20+n*20,50+n*30,140+n*40,180]);
+                }
+                break;
+            case BLOCK.COBBLE:
+                for(let y=0;y<TEX_SIZE;y++) for(let x=0;x<TEX_SIZE;x++) {
+                    let n=hashRand(x,y,13);let v=90+n*40;
+                    setPixel(x,y,[v,v-3,v-5]);
+                }
+                for(let i=0;i<6;i++){
+                    let bx=hashRand(i,0,14)*14+1|0,by=hashRand(i,1,14)*14+1|0;
+                    let s=hashRand(i,2,14)*3+2|0;
+                    for(let dy=-s;dy<=s;dy++) for(let dx=-s;dx<=s;dx++)
+                        if(dx*dx+dy*dy<s*s){let px=bx+dx,py=by+dy;let c=getPixel(px,py);let sh=hashRand(i,3,14)*20-10;setPixel(px,py,[c[0]+sh,c[1]+sh,c[2]+sh,c[3]]);}
+                    for(let a=0;a<Math.PI*2;a+=0.3){let px=bx+Math.cos(a)*s|0,py=by+Math.sin(a)*s|0;let c=getPixel(px,py);setPixel(px,py,[c[0]*0.7,c[1]*0.7,c[2]*0.7,c[3]]);}
+                }
+                addNoise(8,6); break;
+            case BLOCK.PLANKS:
+                for(let y=0;y<TEX_SIZE;y++) for(let x=0;x<TEX_SIZE;x++) {
+                    let plank=(y/4|0);let n=hashRand(x,y,15);
+                    let v=160+n*25+(plank%2)*10;let line=(y%4===0)?0.7:1;
+                    setPixel(x,y,[v*line,v*0.72*line,v*0.42*line]);
+                }
+                for(let p=0;p<4;p++){let nx=hashRand(p,0,16)*12+2|0,ny=p*4+2;setPixel(nx,ny,[60,55,50]);}
+                addNoise(8,7); break;
+            case BLOCK.COAL_ORE:
+                for(let y=0;y<TEX_SIZE;y++) for(let x=0;x<TEX_SIZE;x++){let n=hashRand(x,y,5);let v=100+n*30;setPixel(x,y,[v,v-2,v-5]);}
+                for(let i=0;i<5;i++){let cx=hashRand(i,0,17)*12+2|0,cy=hashRand(i,1,17)*12+2|0;
+                    for(let dy=-1;dy<=1;dy++) for(let dx=-1;dx<=1;dx++) if(hashRand(i+dx,dy,17)<0.7) setPixel(cx+dx,cy+dy,[25+hashRand(i,dx+dy,18)*15,25,25]);}
+                addNoise(8,8); break;
+            case BLOCK.IRON_ORE:
+                for(let y=0;y<TEX_SIZE;y++) for(let x=0;x<TEX_SIZE;x++){let n=hashRand(x,y,5);let v=100+n*30;setPixel(x,y,[v,v-2,v-5]);}
+                for(let i=0;i<4;i++){let cx=hashRand(i,0,19)*12+2|0,cy=hashRand(i,1,19)*12+2|0;
+                    for(let dy=-1;dy<=1;dy++) for(let dx=-1;dx<=1;dx++) if(hashRand(i+dx,dy,19)<0.65) setPixel(cx+dx,cy+dy,[180+hashRand(i,0,20)*40,140+hashRand(i,1,20)*30,120]);}
+                addNoise(8,9); break;
+            case BLOCK.GOLD_ORE:
+                for(let y=0;y<TEX_SIZE;y++) for(let x=0;x<TEX_SIZE;x++){let n=hashRand(x,y,5);let v=100+n*30;setPixel(x,y,[v,v-2,v-5]);}
+                for(let i=0;i<3;i++){let cx=hashRand(i,0,21)*12+2|0,cy=hashRand(i,1,21)*12+2|0;
+                    for(let dy=-1;dy<=1;dy++) for(let dx=-1;dx<=1;dx++) if(hashRand(i+dx,dy,21)<0.6) setPixel(cx+dx,cy+dy,[220+hashRand(i,0,22)*35,190+hashRand(i,1,22)*30,40]);}
+                addNoise(8,10); break;
+            case BLOCK.BRICK:
+                fill([140,75,55]);
+                for(let y=0;y<TEX_SIZE;y++) for(let x=0;x<TEX_SIZE;x++) {
+                    let n=hashRand(x,y,23);let row=y/4|0;let off=(row%2)*4;
+                    if(y%4===0||(x+off)%8===0) setPixel(x,y,[170+n*20,165+n*15,150+n*10]);
+                    else{let v=140+n*30;setPixel(x,y,[v,v*0.5,v*0.35]);}
+                }
+                addNoise(10,11); break;
+            case BLOCK.SNOW:
+                for(let y=0;y<TEX_SIZE;y++) for(let x=0;x<TEX_SIZE;x++){let n=hashRand(x,y,24);let v=230+n*25;setPixel(x,y,[v,v,Math.min(255,v+5)]);}
+                addNoise(5,12); break;
+            case BLOCK.GRAVEL:
+                for(let y=0;y<TEX_SIZE;y++) for(let x=0;x<TEX_SIZE;x++){let n=hashRand(x,y,25);let v=100+n*50;setPixel(x,y,[v,v-3,v-8]);}
+                addNoise(15,13); break;
+            case BLOCK.GLASS:
+                fill([200,220,235,50]);
+                for(let i=0;i<TEX_SIZE;i++){setPixel(i,0,[180,200,210,220]);setPixel(i,TEX_SIZE-1,[180,200,210,220]);setPixel(0,i,[180,200,210,220]);setPixel(TEX_SIZE-1,i,[180,200,210,220]);}
+                for(let i=0;i<5;i++){setPixel(2+i,2,[255,255,255,100]);setPixel(2,2+i,[255,255,255,80]);}
+                break;
+            case BLOCK.BEDROCK:
+                for(let y=0;y<TEX_SIZE;y++) for(let x=0;x<TEX_SIZE;x++){let n=hashRand(x,y,27);let v=30+n*30;setPixel(x,y,[v,v,v]);}
+                addNoise(10,14); break;
+            case BLOCK.BOOKSHELF:
+                if(face==='top'||face==='bottom') {
+                    for(let y=0;y<TEX_SIZE;y++) for(let x=0;x<TEX_SIZE;x++){let n=hashRand(x,y,15);let v=160+n*25;setPixel(x,y,[v,v*0.72,v*0.42]);}
+                } else {
+                    fill([140,110,70]);
+                    let bx=1;
+                    while(bx<TEX_SIZE-1){
+                        let bw=1+(hashRand(bx,0,28)*2|0);
+                        let colors=[[120+hashRand(bx,1,28)*60,30+hashRand(bx,2,28)*40,30],[30,60+hashRand(bx,3,28)*60,30+hashRand(bx,4,28)*40],[30+hashRand(bx,5,28)*40,30,100+hashRand(bx,6,28)*60],[130+hashRand(bx,7,28)*40,100+hashRand(bx,8,28)*30,30]];
+                        let col=colors[hashRand(bx,9,28)*4|0];
+                        for(let shelf=0;shelf<2;shelf++){let sy=shelf*8+1;for(let dy=0;dy<6;dy++) for(let dx=0;dx<bw;dx++) setPixel(bx+dx,sy+dy,col);}
+                        bx+=bw+1;
+                    }
+                    for(let x=0;x<TEX_SIZE;x++){setPixel(x,0,[100,75,40]);setPixel(x,8,[100,75,40]);setPixel(x,7,[90,65,35]);setPixel(x,15,[100,75,40]);}
+                }
+                addNoise(8,15); break;
+            case BLOCK.TALL_GRASS:
+                for(let s=0;s<3;s++){
+                    let bx=4+s*4+(hashRand(s,0,29)*3-1|0);
+                    for(let y=TEX_SIZE-1;y>=4;y--){let sway=Math.sin((TEX_SIZE-y)*0.3+s)*1.5;let px=bx+sway|0;let n=hashRand(px,y,30);
+                        setPixel(px,y,[40+n*20,90+n*50,20+n*15,255]);if(px+1<TEX_SIZE) setPixel(px+1,y,[35+n*15,80+n*40,18+n*10,200]);}
+                } break;
+            case BLOCK.FLOWER_RED:
+                for(let y=8;y<TEX_SIZE;y++){setPixel(7,y,[30,80,20,255]);setPixel(8,y,[30,80,20,255]);}
+                [[7,5],[9,5],[6,6],[10,6],[7,7],[9,7],[8,4],[8,6]].forEach(([x,y])=>setPixel(x,y,[200+hashRand(x,y,71)*55,20,20,255]));
+                setPixel(8,5,[255,220,50,255]); break;
+            case BLOCK.FLOWER_YELLOW:
+                for(let y=8;y<TEX_SIZE;y++){setPixel(7,y,[30,80,20,255]);setPixel(8,y,[30,80,20,255]);}
+                [[7,5],[9,5],[6,6],[10,6],[7,7],[9,7],[8,4],[8,6]].forEach(([x,y])=>setPixel(x,y,[240,210+hashRand(x,y,72)*40,20,255]));
+                setPixel(8,5,[180,120,20,255]); break;
+            case BLOCK.MUSHROOM:
+                for(let y=10;y<TEX_SIZE;y++){setPixel(7,y,[200,190,170,255]);setPixel(8,y,[200,190,170,255]);}
+                for(let dy=-3;dy<=0;dy++) for(let dx=-3;dx<=3;dx++)
+                    if(dx*dx+dy*dy<=10){setPixel(8+dx,8+dy,[180,30,30,255]);if(hashRand(dx+3,dy+3,31)<0.3) setPixel(8+dx,8+dy,[240,240,230,255]);}
+                break;
+            case BLOCK.TORCH:
+                for(let y=5;y<TEX_SIZE;y++){setPixel(7,y,[140,110,60,255]);setPixel(8,y,[140,110,60,255]);}
+                setPixel(7,3,[255,200,50,255]);setPixel(8,3,[255,200,50,255]);
+                setPixel(7,4,[255,150,30,255]);setPixel(8,4,[255,150,30,255]);
+                setPixel(8,2,[255,230,100,200]); break;
+            default: fill([255,0,255]); break;
+        }
+        return pixels;
     }
-  } catch(e) {}
-}
 
-const VS_SRC = `
+    function buildTextureAtlas() {
+        let blockTypes = Object.values(BLOCK).filter(v=>v>0);
+        let cols = 3, rows = blockTypes.length;
+        let atlasW = cols * TEX_SIZE, atlasH = rows * TEX_SIZE;
+        let pw = 1; while(pw<atlasW) pw*=2;
+        let ph = 1; while(ph<atlasH) ph*=2;
+        let atlas = new Uint8Array(pw * ph * 4);
+        let uvMap = {};
+        for(let i=0; i<blockTypes.length; i++) {
+            let bt = blockTypes[i];
+            let faces = ['top','side','bottom'];
+            uvMap[bt] = {};
+            for(let f=0; f<3; f++) {
+                let pixels = generateBlockTexture(bt, faces[f]);
+                let ox = f * TEX_SIZE, oy = i * TEX_SIZE;
+                for(let y=0; y<TEX_SIZE; y++) for(let x=0; x<TEX_SIZE; x++) {
+                    let si = (y * TEX_SIZE + x) * 4;
+                    let atlasY = oy + (TEX_SIZE - 1 - y);
+                    let di = (atlasY * pw + (ox + x)) * 4;
+                    atlas[di]=pixels[si]; atlas[di+1]=pixels[si+1]; atlas[di+2]=pixels[si+2]; atlas[di+3]=pixels[si+3];
+                }
+                uvMap[bt][faces[f]] = { u: ox/pw, v: oy/ph, uw: TEX_SIZE/pw, vh: TEX_SIZE/ph };
+            }
+        }
+        return { data: atlas, width: pw, height: ph, uvMap };
+    }
+
+    let audioCtx;
+    function initAudio() { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
+    function playSound(type, volume=0.3) {
+        if(!audioCtx) return;
+        try {
+            let gain = audioCtx.createGain(); gain.connect(audioCtx.destination);
+            switch(type) {
+                case 'break': {
+                    let dur=0.15;
+                    let buf=audioCtx.createBuffer(1,audioCtx.sampleRate*dur|0,audioCtx.sampleRate);
+                    let d=buf.getChannelData(0);
+                    for(let i=0;i<d.length;i++) d[i]=(Math.random()*2-1)*Math.exp(-i/d.length*5);
+                    let src=audioCtx.createBufferSource(); src.buffer=buf;
+                    gain.gain.setValueAtTime(volume,audioCtx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.01,audioCtx.currentTime+dur);
+                    src.connect(gain); src.start(); return;
+                }
+                case 'place': {
+                    let dur=0.1;
+                    let osc=audioCtx.createOscillator(); osc.type='square';
+                    osc.frequency.setValueAtTime(200,audioCtx.currentTime);
+                    osc.frequency.exponentialRampToValueAtTime(100,audioCtx.currentTime+dur);
+                    gain.gain.setValueAtTime(volume*0.5,audioCtx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.01,audioCtx.currentTime+dur);
+                    osc.connect(gain); osc.start(); osc.stop(audioCtx.currentTime+dur); return;
+                }
+                case 'step': {
+                    let dur=0.08;
+                    let buf=audioCtx.createBuffer(1,audioCtx.sampleRate*dur|0,audioCtx.sampleRate);
+                    let d=buf.getChannelData(0); let f=100+Math.random()*100;
+                    for(let i=0;i<d.length;i++) d[i]=(Math.random()*0.5+Math.sin(i/audioCtx.sampleRate*f*6.28)*0.5)*Math.exp(-i/d.length*8);
+                    let src=audioCtx.createBufferSource(); src.buffer=buf;
+                    gain.gain.setValueAtTime(volume*0.2,audioCtx.currentTime);
+                    src.connect(gain); src.start(); return;
+                }
+                case 'hit': {
+                    let dur=0.05;
+                    let osc=audioCtx.createOscillator(); osc.type='sawtooth';
+                    osc.frequency.setValueAtTime(400+Math.random()*200,audioCtx.currentTime);
+                    gain.gain.setValueAtTime(volume*0.3,audioCtx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.01,audioCtx.currentTime+dur);
+                    osc.connect(gain); osc.start(); osc.stop(audioCtx.currentTime+dur); return;
+                }
+            }
+        } catch(e) {}
+    }
+
+    const VS_SRC = `
 attribute vec3 aPos;
 attribute vec2 aUV;
 attribute float aLight;
@@ -587,7 +447,7 @@ void main(){
   vFog = clamp(dist / 90.0, 0.0, 1.0);
 }`;
 
-const FS_SRC = `
+    const FS_SRC = `
 precision mediump float;
 varying vec2 vUV;
 varying float vLight;
@@ -605,7 +465,7 @@ void main(){
   gl_FragColor = vec4(col, tex.a);
 }`;
 
-const VS_PARTICLE = `
+    const VS_PARTICLE = `
 attribute vec3 aPos;
 attribute vec4 aColor;
 attribute float aSize;
@@ -620,7 +480,7 @@ void main(){
   vFog = clamp(dist/90.0,0.0,1.0);
 }`;
 
-const FS_PARTICLE = `
+    const FS_PARTICLE = `
 precision mediump float;
 varying vec4 vColor;
 varying float vFog;
@@ -633,7 +493,7 @@ void main(){
   gl_FragColor = vec4(col, alpha);
 }`;
 
-const VS_SKY = `
+    const VS_SKY = `
 attribute vec2 aPos;
 varying vec2 vPos;
 void main(){
@@ -641,7 +501,7 @@ void main(){
   vPos = aPos;
 }`;
 
-const FS_SKY = `
+    const FS_SKY = `
 precision mediump float;
 varying vec2 vPos;
 uniform float uTime;
@@ -655,42 +515,37 @@ void main(){
   float yDir = rd.y;
   float dayPhase = uTime * 0.02;
   float dayTime = sin(dayPhase) * 0.5 + 0.5;
-  vec3 dayTop = vec3(0.25, 0.45, 0.85);
+  vec3 dayTop     = vec3(0.25, 0.45, 0.85);
   vec3 dayHorizon = vec3(0.65, 0.78, 0.92);
-  vec3 nightTop = vec3(0.01, 0.01, 0.06);
+  vec3 nightTop     = vec3(0.01, 0.01, 0.06);
   vec3 nightHorizon = vec3(0.04, 0.04, 0.1);
-  vec3 top = mix(nightTop, dayTop, dayTime);
+  vec3 top     = mix(nightTop,     dayTop,     dayTime);
   vec3 horizon = mix(nightHorizon, dayHorizon, dayTime);
   float t = clamp(yDir * 2.0 + 0.3, 0.0, 1.0);
   vec3 col = mix(horizon, top, t);
-  if(yDir < 0.0) {
-    col = mix(col, horizon * 0.6, clamp(-yDir * 3.0, 0.0, 1.0));
-  }
+  if(yDir < 0.0) col = mix(col, horizon * 0.6, clamp(-yDir * 3.0, 0.0, 1.0));
   float sunAlt = dayPhase;
   vec3 sunDir = normalize(vec3(cos(sunAlt)*0.8, sin(sunAlt), sin(sunAlt)*0.3));
   float sunDot = dot(rd, sunDir);
-  if(sunDir.y > -0.15) {
+  if(sunDir.y > -0.15){
     float glow = max(0.0, sunDot);
     col += vec3(1.0, 0.85, 0.4) * pow(glow, 64.0) * 2.0;
-    col += vec3(1.0, 0.7, 0.3) * pow(glow, 8.0) * 0.3 * dayTime;
+    col += vec3(1.0, 0.7,  0.3) * pow(glow,  8.0) * 0.3 * dayTime;
     if(sunDot > 0.9994) col = vec3(1.0, 0.98, 0.85);
   }
   vec3 moonDir = -sunDir;
   float moonDot = dot(rd, moonDir);
-  if(moonDir.y > -0.1 && dayTime < 0.5) {
+  if(moonDir.y > -0.1 && dayTime < 0.5){
     if(moonDot > 0.9997) col = mix(col, vec3(0.8, 0.85, 0.9), 0.9);
     col += vec3(0.3, 0.35, 0.5) * pow(max(0.0, moonDot), 128.0);
   }
-  if(dayTime < 0.35 && yDir > 0.0) {
+  if(dayTime < 0.35 && yDir > 0.0){
     vec3 starCoord = floor(rd * 300.0);
     float starHash = fract(sin(dot(starCoord.xy, vec2(12.9898,78.233)) + starCoord.z * 43.12) * 43758.5453);
-    if(starHash > 0.997) {
-      float twinkle = sin(uTime * 3.0 + starHash * 100.0) * 0.3 + 0.7;
-      col += vec3(0.7, 0.7, 0.8) * (1.0 - dayTime * 2.85) * twinkle;
-    }
+    if(starHash > 0.997){ float twinkle = sin(uTime * 3.0 + starHash * 100.0) * 0.3 + 0.7; col += vec3(0.7, 0.7, 0.8) * (1.0 - dayTime * 2.85) * twinkle; }
   }
   float sunHorizon = 1.0 - abs(sunDir.y);
-  if(sunHorizon > 0.7 && yDir < 0.3 && yDir > -0.1) {
+  if(sunHorizon > 0.7 && yDir < 0.3 && yDir > -0.1){
     float factor = (sunHorizon - 0.7) * 3.33;
     float angleFactor = pow(max(0.0, dot(normalize(vec2(rd.x, rd.z)), normalize(vec2(sunDir.x, sunDir.z)))), 3.0);
     col += vec3(0.8, 0.3, 0.1) * factor * angleFactor * 0.5;
@@ -698,1039 +553,906 @@ void main(){
   gl_FragColor = vec4(col, 1.0);
 }`;
 
-function compileShader(src, type) {
-  let s = gl.createShader(type);
-  gl.shaderSource(s, src);
-  gl.compileShader(s);
-  if(!gl.getShaderParameter(s, gl.COMPILE_STATUS)) console.error('Shader error:', gl.getShaderInfoLog(s));
-  return s;
-}
+    function compileShader(src, type) {
+        let s = gl.createShader(type);
+        gl.shaderSource(s, src);
+        gl.compileShader(s);
+        if(!gl.getShaderParameter(s, gl.COMPILE_STATUS)) console.error('Shader error:', gl.getShaderInfoLog(s));
+        return s;
+    }
+    function createProgram(vs, fs) {
+        let p = gl.createProgram();
+        gl.attachShader(p, compileShader(vs, gl.VERTEX_SHADER));
+        gl.attachShader(p, compileShader(fs, gl.FRAGMENT_SHADER));
+        gl.linkProgram(p);
+        if(!gl.getProgramParameter(p, gl.LINK_STATUS)) console.error(gl.getProgramInfoLog(p));
+        return p;
+    }
 
-function createProgram(vs, fs) {
-  let p = gl.createProgram();
-  gl.attachShader(p, compileShader(vs, gl.VERTEX_SHADER));
-  gl.attachShader(p, compileShader(fs, gl.FRAGMENT_SHADER));
-  gl.linkProgram(p);
-  if(!gl.getProgramParameter(p, gl.LINK_STATUS)) console.error(gl.getProgramInfoLog(p));
-  return p;
-}
+    function mat4Perspective(fov, aspect, near, far) {
+        let m = new Float32Array(16); let f = 1/Math.tan(fov/2);
+        m[0]=f/aspect; m[5]=f; m[10]=(far+near)/(near-far); m[11]=-1; m[14]=2*far*near/(near-far); return m;
+    }
+    function mat4LookAt(eye, center, up) {
+        let m = new Float32Array(16);
+        let zx=eye[0]-center[0],zy=eye[1]-center[1],zz=eye[2]-center[2];
+        let zl=Math.sqrt(zx*zx+zy*zy+zz*zz)||1; zx/=zl;zy/=zl;zz/=zl;
+        let xx=up[1]*zz-up[2]*zy,xy=up[2]*zx-up[0]*zz,xz=up[0]*zy-up[1]*zx;
+        let xl=Math.sqrt(xx*xx+xy*xy+xz*xz)||1; xx/=xl;xy/=xl;xz/=xl;
+        let yx=zy*xz-zz*xy,yy=zz*xx-zx*xz,yz=zx*xy-zy*xx;
+        m[0]=xx;m[1]=yx;m[2]=zx;m[4]=xy;m[5]=yy;m[6]=zy;m[8]=xz;m[9]=yz;m[10]=zz;
+        m[12]=-(xx*eye[0]+xy*eye[1]+xz*eye[2]);
+        m[13]=-(yx*eye[0]+yy*eye[1]+yz*eye[2]);
+        m[14]=-(zx*eye[0]+zy*eye[1]+zz*eye[2]);
+        m[15]=1; return m;
+    }
+    function mat4Mul(a, b) {
+        let m = new Float32Array(16);
+        for(let i=0;i<4;i++) for(let j=0;j<4;j++){let s=0;for(let k=0;k<4;k++) s+=a[i+k*4]*b[k+j*4];m[i+j*4]=s;}
+        return m;
+    }
+    function mat4Invert(a) {
+        let m = new Float32Array(16);
+        let a00=a[0],a01=a[1],a02=a[2],a03=a[3],a10=a[4],a11=a[5],a12=a[6],a13=a[7];
+        let a20=a[8],a21=a[9],a22=a[10],a23=a[11],a30=a[12],a31=a[13],a32=a[14],a33=a[15];
+        let b00=a00*a11-a01*a10,b01=a00*a12-a02*a10,b02=a00*a13-a03*a10;
+        let b03=a01*a12-a02*a11,b04=a01*a13-a03*a11,b05=a02*a13-a03*a12;
+        let b06=a20*a31-a21*a30,b07=a20*a32-a22*a30,b08=a20*a33-a23*a30;
+        let b09=a21*a32-a22*a31,b10=a21*a33-a23*a31,b11=a22*a33-a23*a32;
+        let det=b00*b11-b01*b10+b02*b09+b03*b08-b04*b07+b05*b06;
+        if(!det) return m; det=1.0/det;
+        m[0]=(a11*b11-a12*b10+a13*b09)*det; m[1]=(a02*b10-a01*b11-a03*b09)*det;
+        m[2]=(a31*b05-a32*b04+a33*b03)*det; m[3]=(a22*b04-a21*b05-a23*b03)*det;
+        m[4]=(a12*b08-a10*b11-a13*b07)*det; m[5]=(a00*b11-a02*b08+a03*b07)*det;
+        m[6]=(a32*b02-a30*b05-a33*b01)*det; m[7]=(a20*b05-a22*b02+a23*b01)*det;
+        m[8]=(a10*b10-a11*b08+a13*b06)*det; m[9]=(a01*b08-a00*b10-a03*b06)*det;
+        m[10]=(a30*b04-a31*b02+a33*b00)*det; m[11]=(a21*b02-a20*b04-a23*b00)*det;
+        m[12]=(a11*b07-a10*b09-a12*b06)*det; m[13]=(a00*b09-a01*b07+a02*b06)*det;
+        m[14]=(a31*b01-a30*b03-a32*b00)*det; m[15]=(a20*b03-a21*b01+a22*b00)*det;
+        return m;
+    }
 
-function mat4Perspective(fov, aspect, near, far) {
-  let m = new Float32Array(16);
-  let f = 1/Math.tan(fov/2);
-  m[0]=f/aspect; m[5]=f; m[10]=(far+near)/(near-far); m[11]=-1;
-  m[14]=2*far*near/(near-far);
-  return m;
-}
-function mat4LookAt(eye, center, up) {
-  let m = new Float32Array(16);
-  let zx=eye[0]-center[0], zy=eye[1]-center[1], zz=eye[2]-center[2];
-  let zl=Math.sqrt(zx*zx+zy*zy+zz*zz)||1; zx/=zl;zy/=zl;zz/=zl;
-  let xx=up[1]*zz-up[2]*zy, xy=up[2]*zx-up[0]*zz, xz=up[0]*zy-up[1]*zx;
-  let xl=Math.sqrt(xx*xx+xy*xy+xz*xz)||1; xx/=xl;xy/=xl;xz/=xl;
-  let yx=zy*xz-zz*xy, yy=zz*xx-zx*xz, yz=zx*xy-zy*xx;
-  m[0]=xx;m[1]=yx;m[2]=zx;m[4]=xy;m[5]=yy;m[6]=zy;m[8]=xz;m[9]=yz;m[10]=zz;
-  m[12]=-(xx*eye[0]+xy*eye[1]+xz*eye[2]);
-  m[13]=-(yx*eye[0]+yy*eye[1]+yz*eye[2]);
-  m[14]=-(zx*eye[0]+zy*eye[1]+zz*eye[2]);
-  m[15]=1;
-  return m;
-}
-function mat4Mul(a, b) {
-  let m = new Float32Array(16);
-  for(let i=0;i<4;i++) for(let j=0;j<4;j++){
-    let s=0; for(let k=0;k<4;k++) s+=a[i+k*4]*b[k+j*4]; m[i+j*4]=s;
-  }
-  return m;
-}
-function mat4Invert(a) {
-  let m = new Float32Array(16);
-  let a00=a[0],a01=a[1],a02=a[2],a03=a[3];
-  let a10=a[4],a11=a[5],a12=a[6],a13=a[7];
-  let a20=a[8],a21=a[9],a22=a[10],a23=a[11];
-  let a30=a[12],a31=a[13],a32=a[14],a33=a[15];
-  let b00=a00*a11-a01*a10, b01=a00*a12-a02*a10, b02=a00*a13-a03*a10;
-  let b03=a01*a12-a02*a11, b04=a01*a13-a03*a11, b05=a02*a13-a03*a12;
-  let b06=a20*a31-a21*a30, b07=a20*a32-a22*a30, b08=a20*a33-a23*a30;
-  let b09=a21*a32-a22*a31, b10=a21*a33-a23*a31, b11=a22*a33-a23*a32;
-  let det=b00*b11-b01*b10+b02*b09+b03*b08-b04*b07+b05*b06;
-  if(!det) return m;
-  det = 1.0/det;
-  m[0]=(a11*b11-a12*b10+a13*b09)*det;
-  m[1]=(a02*b10-a01*b11-a03*b09)*det;
-  m[2]=(a31*b05-a32*b04+a33*b03)*det;
-  m[3]=(a22*b04-a21*b05-a23*b03)*det;
-  m[4]=(a12*b08-a10*b11-a13*b07)*det;
-  m[5]=(a00*b11-a02*b08+a03*b07)*det;
-  m[6]=(a32*b02-a30*b05-a33*b01)*det;
-  m[7]=(a20*b05-a22*b02+a23*b01)*det;
-  m[8]=(a10*b10-a11*b08+a13*b06)*det;
-  m[9]=(a01*b08-a00*b10-a03*b06)*det;
-  m[10]=(a30*b04-a31*b02+a33*b00)*det;
-  m[11]=(a21*b02-a20*b04-a23*b00)*det;
-  m[12]=(a11*b07-a10*b09-a12*b06)*det;
-  m[13]=(a00*b09-a01*b07+a02*b06)*det;
-  m[14]=(a31*b01-a30*b03-a32*b00)*det;
-  m[15]=(a20*b03-a21*b01+a22*b00)*det;
-  return m;
-}
+    let chunks = {};
+    let chunkMeshes = {};
+    let dirtyChunks = new Set();
+    // Кэш отсортированных прозрачных VAO
+    let transparentBufferCache = {};
 
-let chunks = {};
-let chunkMeshes = {};
-let dirtyChunks = new Set();
+    function chunkKey(cx,cz) { return cx+','+cz; }
 
-function chunkKey(cx,cz) { return cx+','+cz; }
+    function getTerrainHeight(wx, wz) {
+        let h = 0;
+        h += noise.fbm2D(wx*0.008, wz*0.008, 5) * 30;
+        h += noise2.fbm2D(wx*0.02, wz*0.02, 3) * 10;
+        let mt = noise3.fbm2D(wx*0.005, wz*0.005, 4);
+        if(mt > 0.2) h += (mt-0.2)*80;
+        return 30 + h | 0;
+    }
 
-function getTerrainHeight(wx, wz) {
-  let h = 0;
-  h += noise.fbm2D(wx*0.008, wz*0.008, 5) * 30;
-  h += noise2.fbm2D(wx*0.02, wz*0.02, 3) * 10;
-  let mt = noise3.fbm2D(wx*0.005, wz*0.005, 4);
-  if(mt > 0.2) h += (mt-0.2)*80;
-  return 30 + h | 0;
-}
+    function getBiome(wx, wz) {
+        let temp  = noise.fbm2D(wx*0.003+100, wz*0.003+100, 3);
+        let moist = noise2.fbm2D(wx*0.004+200, wz*0.004+200, 3);
+        if(temp > 0.3)  return moist > 0.1 ? 'forest' : 'desert';
+        if(temp < -0.3) return 'snow';
+        if(moist > 0.2) return 'forest';
+        return 'plains';
+    }
 
-function getBiome(wx, wz) {
-  let temp = noise.fbm2D(wx*0.003+100, wz*0.003+100, 3);
-  let moist = noise2.fbm2D(wx*0.004+200, wz*0.004+200, 3);
-  if(temp > 0.3) return moist > 0.1 ? 'forest' : 'desert';
-  if(temp < -0.3) return 'snow';
-  if(moist > 0.2) return 'forest';
-  return 'plains';
-}
-
-function generateChunk(cx, cz) {
-  let data = new Uint8Array(CHUNK_SIZE * CHUNK_HEIGHT * CHUNK_SIZE);
-  for(let x = 0; x < CHUNK_SIZE; x++) {
-    for(let z = 0; z < CHUNK_SIZE; z++) {
-      let wx = cx * CHUNK_SIZE + x;
-      let wz = cz * CHUNK_SIZE + z;
-      let h = getTerrainHeight(wx, wz);
-      let biome = getBiome(wx, wz);
-      let waterLevel = 28;
-      for(let y = 0; y < CHUNK_HEIGHT; y++) {
-        let idx = x*CHUNK_HEIGHT*CHUNK_SIZE + y*CHUNK_SIZE + z;
-        if(y === 0) { data[idx] = BLOCK.BEDROCK; }
-        else if(y < h - 4) {
-          data[idx] = BLOCK.STONE;
-          if(y < 20) {
-            let oreN = noise3.noise3D(wx*0.1, y*0.1, wz*0.1);
-            if(oreN > 0.7) data[idx] = BLOCK.GOLD_ORE;
-            else if(oreN > 0.55) data[idx] = BLOCK.IRON_ORE;
-            else if(oreN > 0.4) data[idx] = BLOCK.COAL_ORE;
-          } else if(y < 40) {
-            let oreN = noise3.noise3D(wx*0.1, y*0.1, wz*0.1);
-            if(oreN > 0.65) data[idx] = BLOCK.IRON_ORE;
-            else if(oreN > 0.5) data[idx] = BLOCK.COAL_ORE;
-          }
-          let cave = noise.fbm(wx*0.05, y*0.08, wz*0.05, 3);
-          if(cave > 0.45 && y > 2 && y < h-5) data[idx] = BLOCK.AIR;
-        } else if(y < h) {
-          data[idx] = biome === 'desert' ? BLOCK.SAND : BLOCK.DIRT;
-        } else if(y === h) {
-          data[idx] = biome === 'desert' ? BLOCK.SAND : biome === 'snow' ? BLOCK.SNOW : BLOCK.GRASS;
-        } else if(y <= waterLevel && y > h) {
-          data[idx] = BLOCK.WATER;
-        }
-      }
-      if(h > waterLevel && (biome === 'forest' || biome === 'plains' || biome === 'snow')) {
-        let treeN = noise.noise2D(wx*0.5, wz*0.5);
-        let treeChance = biome === 'forest' ? 0.55 : 0.65;
-        if(treeN > treeChance && x>2 && x<CHUNK_SIZE-3 && z>2 && z<CHUNK_SIZE-3) {
-          let th = 4 + (noise2.noise2D(wx*1.1,wz*1.1)*0.5+0.5)*3|0;
-          for(let ty = 1; ty <= th; ty++) {
-            let tidx = x*CHUNK_HEIGHT*CHUNK_SIZE+(h+ty)*CHUNK_SIZE+z;
-            if(h+ty < CHUNK_HEIGHT) data[tidx] = BLOCK.WOOD;
-          }
-          let lr = 2;
-          for(let ly = th-1; ly <= th+2; ly++) {
-            let r = ly>th?1:lr;
-            for(let lx = -r; lx <= r; lx++) for(let lz = -r; lz <= r; lz++) {
-              if(lx===0&&lz===0&&ly<=th) continue;
-              if(Math.abs(lx)+Math.abs(lz) > r+1) continue;
-              let px=x+lx,pz=z+lz,py=h+ly;
-              if(px>=0&&px<CHUNK_SIZE&&pz>=0&&pz<CHUNK_SIZE&&py<CHUNK_HEIGHT) {
-                let lidx = px*CHUNK_HEIGHT*CHUNK_SIZE+py*CHUNK_SIZE+pz;
-                if(data[lidx] === BLOCK.AIR) data[lidx] = BLOCK.LEAVES;
-              }
+    function generateChunk(cx, cz) {
+        let data = new Uint8Array(CHUNK_SIZE * CHUNK_HEIGHT * CHUNK_SIZE);
+        for(let x=0; x<CHUNK_SIZE; x++) {
+            for(let z=0; z<CHUNK_SIZE; z++) {
+                let wx = cx*CHUNK_SIZE+x, wz = cz*CHUNK_SIZE+z;
+                let h = getTerrainHeight(wx, wz);
+                let biome = getBiome(wx, wz);
+                let waterLevel = 28;
+                for(let y=0; y<CHUNK_HEIGHT; y++) {
+                    let idx = x*CHUNK_HEIGHT*CHUNK_SIZE + y*CHUNK_SIZE + z;
+                    if(y===0) { data[idx]=BLOCK.BEDROCK; }
+                    else if(y < h-4) {
+                        data[idx]=BLOCK.STONE;
+                        if(y<20){ let oreN=noise3.noise3D(wx*0.1,y*0.1,wz*0.1); if(oreN>0.7) data[idx]=BLOCK.GOLD_ORE; else if(oreN>0.55) data[idx]=BLOCK.IRON_ORE; else if(oreN>0.4) data[idx]=BLOCK.COAL_ORE; }
+                        else if(y<40){ let oreN=noise3.noise3D(wx*0.1,y*0.1,wz*0.1); if(oreN>0.65) data[idx]=BLOCK.IRON_ORE; else if(oreN>0.5) data[idx]=BLOCK.COAL_ORE; }
+                        let cave=noise.fbm(wx*0.05,y*0.08,wz*0.05,3);
+                        if(cave>0.45&&y>2&&y<h-5) data[idx]=BLOCK.AIR;
+                    } else if(y < h) { data[idx]=biome==='desert'?BLOCK.SAND:BLOCK.DIRT; }
+                    else if(y===h) { data[idx]=biome==='desert'?BLOCK.SAND:biome==='snow'?BLOCK.SNOW:BLOCK.GRASS; }
+                    else if(y<=waterLevel&&y>h) { data[idx]=BLOCK.WATER; }
+                }
+                if(h>waterLevel&&(biome==='forest'||biome==='plains'||biome==='snow')){
+                    let treeN=noise.noise2D(wx*0.5,wz*0.5);
+                    let treeChance=biome==='forest'?0.55:0.65;
+                    if(treeN>treeChance&&x>2&&x<CHUNK_SIZE-3&&z>2&&z<CHUNK_SIZE-3){
+                        let th=4+(noise2.noise2D(wx*1.1,wz*1.1)*0.5+0.5)*3|0;
+                        for(let ty=1;ty<=th;ty++){let tidx=x*CHUNK_HEIGHT*CHUNK_SIZE+(h+ty)*CHUNK_SIZE+z;if(h+ty<CHUNK_HEIGHT) data[tidx]=BLOCK.WOOD;}
+                        let lr=2;
+                        for(let ly=th-1;ly<=th+2;ly++){
+                            let r=ly>th?1:lr;
+                            for(let lx=-r;lx<=r;lx++) for(let lz=-r;lz<=r;lz++){
+                                if(lx===0&&lz===0&&ly<=th) continue;
+                                if(Math.abs(lx)+Math.abs(lz)>r+1) continue;
+                                let px=x+lx,pz=z+lz,py=h+ly;
+                                if(px>=0&&px<CHUNK_SIZE&&pz>=0&&pz<CHUNK_SIZE&&py<CHUNK_HEIGHT){let lidx=px*CHUNK_HEIGHT*CHUNK_SIZE+py*CHUNK_SIZE+pz;if(data[lidx]===BLOCK.AIR) data[lidx]=BLOCK.LEAVES;}
+                            }
+                        }
+                    }
+                }
+                if(h>waterLevel&&h<CHUNK_HEIGHT-1&&(biome==='plains'||biome==='forest')){
+                    let fidx=x*CHUNK_HEIGHT*CHUNK_SIZE+(h+1)*CHUNK_SIZE+z;
+                    if(data[fidx]===BLOCK.AIR){
+                        let fn=noise2.noise2D(wx*1.7,wz*1.7);
+                        if(fn>0.3) data[fidx]=BLOCK.TALL_GRASS;
+                        else if(fn>0.25) data[fidx]=BLOCK.FLOWER_RED;
+                        else if(fn>0.2) data[fidx]=BLOCK.FLOWER_YELLOW;
+                        else if(fn<-0.45&&biome==='forest') data[fidx]=BLOCK.MUSHROOM;
+                    }
+                }
             }
-          }
         }
-      }
-      if(h > waterLevel && h < CHUNK_HEIGHT-1 && (biome === 'plains' || biome === 'forest')) {
-        let fidx = x*CHUNK_HEIGHT*CHUNK_SIZE+(h+1)*CHUNK_SIZE+z;
-        if(data[fidx] === BLOCK.AIR) {
-          let fn = noise2.noise2D(wx*1.7, wz*1.7);
-          if(fn > 0.3) data[fidx] = BLOCK.TALL_GRASS;
-          else if(fn > 0.25) data[fidx] = BLOCK.FLOWER_RED;
-          else if(fn > 0.2) data[fidx] = BLOCK.FLOWER_YELLOW;
-          else if(fn < -0.45 && biome === 'forest') data[fidx] = BLOCK.MUSHROOM;
-        }
-      }
+        return data;
     }
-  }
-  return data;
-}
 
-function getBlock(wx, wy, wz) {
-  if(wy < 0 || wy >= CHUNK_HEIGHT) return BLOCK.AIR;
-  let cx = Math.floor(wx / CHUNK_SIZE);
-  let cz = Math.floor(wz / CHUNK_SIZE);
-  let key = chunkKey(cx, cz);
-  if(!chunks[key]) return BLOCK.AIR;
-  let lx = ((wx % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
-  let lz = ((wz % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
-  return chunks[key][lx * CHUNK_HEIGHT * CHUNK_SIZE + wy * CHUNK_SIZE + lz];
-}
-
-function setBlock(wx, wy, wz, type) {
-  if(wy < 0 || wy >= CHUNK_HEIGHT) return;
-  let cx = Math.floor(wx / CHUNK_SIZE);
-  let cz = Math.floor(wz / CHUNK_SIZE);
-  let key = chunkKey(cx, cz);
-  if(!chunks[key]) return;
-  let lx = ((wx % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
-  let lz = ((wz % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
-  chunks[key][lx * CHUNK_HEIGHT * CHUNK_SIZE + wy * CHUNK_SIZE + lz] = type;
-  dirtyChunks.add(key);
-  if(lx===0) dirtyChunks.add(chunkKey(cx-1,cz));
-  if(lx===CHUNK_SIZE-1) dirtyChunks.add(chunkKey(cx+1,cz));
-  if(lz===0) dirtyChunks.add(chunkKey(cx,cz-1));
-  if(lz===CHUNK_SIZE-1) dirtyChunks.add(chunkKey(cx,cz+1));
-}
-
-function isOpaque(b) { return b !== BLOCK.AIR && !TRANSPARENT.has(b); }
-
-function buildChunkMesh(cx, cz) {
-  let key = chunkKey(cx, cz);
-  let data = chunks[key];
-  if(!data) return null;
-
-  let positions = [], uvs = [], lights = [], aos = [];
-  let tPositions = [], tUvs = [], tLights = [], tAos = [];
-
-  // pushQuad: verts[0..3] define quad corners.
-  // UV corners map as: 0=top-left, 1=top-right, 2=bottom-right, 3=bottom-left of the texture.
-  // Since we flipped Y in atlas: top of texture = high V, bottom = low V.
-  // So: top-left=(u, v+vh), top-right=(u+uw, v+vh), bottom-right=(u+uw, v), bottom-left=(u, v)
-  // Triangles: 0,1,2 then 0,2,3
-  function pushQuad(verts, uvRect, light, ao, transparent, triOrder) {
-    let p = transparent ? tPositions : positions;
-    let u = transparent ? tUvs : uvs;
-    let l = transparent ? tLights : lights;
-    let a = transparent ? tAos : aos;
-
-    let uvCorners = [
-      [uvRect.u,             uvRect.v + uvRect.vh],  // 0: top-left
-      [uvRect.u + uvRect.uw, uvRect.v + uvRect.vh],  // 1: top-right
-      [uvRect.u + uvRect.uw, uvRect.v],               // 2: bottom-right
-      [uvRect.u,             uvRect.v]                 // 3: bottom-left
-    ];
-
-    let indices = triOrder || [0,1,2, 0,2,3];
-    for(let idx of indices) {
-      p.push(verts[idx][0], verts[idx][1], verts[idx][2]);
-      u.push(uvCorners[idx][0], uvCorners[idx][1]);
-      l.push(light);
-      a.push(ao[idx]);
+    function getBlock(wx, wy, wz) {
+        if(wy<0||wy>=CHUNK_HEIGHT) return BLOCK.AIR;
+        let cx=Math.floor(wx/CHUNK_SIZE), cz=Math.floor(wz/CHUNK_SIZE);
+        let key=chunkKey(cx,cz);
+        if(!chunks[key]) return BLOCK.AIR;
+        let lx=((wx%CHUNK_SIZE)+CHUNK_SIZE)%CHUNK_SIZE;
+        let lz=((wz%CHUNK_SIZE)+CHUNK_SIZE)%CHUNK_SIZE;
+        return chunks[key][lx*CHUNK_HEIGHT*CHUNK_SIZE + wy*CHUNK_SIZE + lz];
     }
-  }
 
-  for(let x=0; x<CHUNK_SIZE; x++) {
-    for(let y=0; y<CHUNK_HEIGHT; y++) {
-      for(let z=0; z<CHUNK_SIZE; z++) {
-        let idx = x*CHUNK_HEIGHT*CHUNK_SIZE + y*CHUNK_SIZE + z;
-        let block = data[idx];
-        if(block === BLOCK.AIR) continue;
+    function setBlock(wx, wy, wz, type) {
+        if(wy<0||wy>=CHUNK_HEIGHT) return;
+        let cx=Math.floor(wx/CHUNK_SIZE), cz=Math.floor(wz/CHUNK_SIZE);
+        let key=chunkKey(cx,cz);
+        if(!chunks[key]) return;
+        let lx=((wx%CHUNK_SIZE)+CHUNK_SIZE)%CHUNK_SIZE;
+        let lz=((wz%CHUNK_SIZE)+CHUNK_SIZE)%CHUNK_SIZE;
+        chunks[key][lx*CHUNK_HEIGHT*CHUNK_SIZE + wy*CHUNK_SIZE + lz]=type;
+        dirtyChunks.add(key);
+        if(lx===0) dirtyChunks.add(chunkKey(cx-1,cz));
+        if(lx===CHUNK_SIZE-1) dirtyChunks.add(chunkKey(cx+1,cz));
+        if(lz===0) dirtyChunks.add(chunkKey(cx,cz-1));
+        if(lz===CHUNK_SIZE-1) dirtyChunks.add(chunkKey(cx,cz+1));
+    }
 
-        let wx = cx*CHUNK_SIZE+x, wz = cz*CHUNK_SIZE+z;
-        let isTrans = TRANSPARENT.has(block);
-        let isAlpha = ALPHA_BLOCKS.has(block);
-        let isCross = CROSS_BLOCKS.has(block);
-        let uvInfo = textureAtlas.uvMap[block];
-        if(!uvInfo) continue;
+    function isOpaque(b) { return b!==BLOCK.AIR && !TRANSPARENT.has(b); }
 
-        if(isCross) {
-          let light = 0.85;
-          let fUV = uvInfo.side;
-          let ao4 = [1,1,1,1];
-          // verts: 0,1=top edge, 2,3=bottom edge
-          let dA = [
-            [wx,   y+1, wz],
-            [wx+1, y+1, wz+1],
-            [wx+1, y,   wz+1],
-            [wx,   y,   wz]
-          ];
-          pushQuad(dA, fUV, light, ao4, false, [0,1,2, 0,2,3]);
-          pushQuad(dA, fUV, light, ao4, false, [2,1,0, 3,2,0]);
-          let dB = [
-            [wx+1, y+1, wz],
-            [wx,   y+1, wz+1],
-            [wx,   y,   wz+1],
-            [wx+1, y,   wz]
-          ];
-          pushQuad(dB, fUV, light, ao4, false, [0,1,2, 0,2,3]);
-          pushQuad(dB, fUV, light, ao4, false, [2,1,0, 3,2,0]);
-          continue;
-        }
+    // ─── buildChunkMesh ──────────────────────────────────────────────────────────
+    // Прозрачные грани хранятся как массив квадов (tQuads) для последующей сортировки.
+    // Непрозрачные сразу упаковываются в GPU-буфер.
+    function buildChunkMesh(cx, cz) {
+        let key = chunkKey(cx, cz);
+        let data = chunks[key];
+        if(!data) return null;
 
-        let nb = [
-          getBlock(wx, y+1, wz),
-          getBlock(wx, y-1, wz),
-          getBlock(wx+1, y, wz),
-          getBlock(wx-1, y, wz),
-          getBlock(wx, y, wz+1),
-          getBlock(wx, y, wz-1),
-        ];
+        // Непрозрачная геометрия
+        let positions = [], uvs = [], lights = [], aos = [];
 
-        let shouldShow = (faceIdx) => {
-          if(isAlpha) return nb[faceIdx] !== block && !isOpaque(nb[faceIdx]);
-          if(isTrans) return nb[faceIdx] !== block;
-          return !isOpaque(nb[faceIdx]);
-        };
+        // Прозрачные квады — массив объектов для динамической сортировки
+        // Каждый квад: { pos[18], uv[12], li[6], ao[6], cx, cy, cz }
+        let tQuads = [];
 
-        let useTransPass = isAlpha;
+        // ── helpers ──────────────────────────────────────────────────────────────
 
-        // For each face, verts are labeled viewing from OUTSIDE the block:
-        //   0 = top-left, 1 = top-right, 2 = bottom-right, 3 = bottom-left
-        // Triangle order 0,1,2 + 0,2,3 must be CCW from outside.
-        // Verification: cross(v1-v0, v2-v0) must point outward (= face normal direction).
-        //
-        // TOP (+Y): viewed from above, "top" of texture = back (-Z side)
-        //   v0=(wx,y+1,wz+1) v1=(wx+1,y+1,wz+1) v2=(wx+1,y+1,wz) v3=(wx,y+1,wz)
-        //   cross = (1,0,0)×(1,0,-1) = (0·(-1)-0·0, 0·1-1·(-1), 1·0-0·1) = (0,1,0) ✓
-        //
-        // BOTTOM (-Y): viewed from below
-        //   v0=(wx,y,wz) v1=(wx+1,y,wz) v2=(wx+1,y,wz+1) v3=(wx,y,wz+1)
-        //   cross = (1,0,0)×(1,0,1) = (0·1-0·0, 0·1-1·1, 1·0-0·1) = (0,-1,0) ✓
-        //
-        // EAST (+X): viewed from +X side, "left" of texture = +Z side
-        //   v0=(wx+1,y+1,wz+1) v1=(wx+1,y+1,wz) v2=(wx+1,y,wz) v3=(wx+1,y,wz+1)
-        //   cross = (0,0,-1)×(0,-1,-1) = (0·(-1)-(-1)·(-1), (-1)·0-0·(-1), 0·(-1)-0·0) = (-1,0,0) ✗ WRONG
-        //   Fix: swap winding → v0=(wx+1,y+1,wz) v1=(wx+1,y+1,wz+1) v2=(wx+1,y,wz+1) v3=(wx+1,y,wz)
-        //   cross = (0,0,1)×(0,-1,1) = (0·1-1·(-1), 1·0-0·1, 0·(-1)-0·0) = (1,0,0) ✓
-        //
-        // WEST (-X): viewed from -X side
-        //   v0=(wx,y+1,wz) v1=(wx,y+1,wz+1) v2=(wx,y,wz+1) v3=(wx,y,wz)
-        //   cross = (0,0,1)×(0,-1,1) = (0·1-1·(-1), 1·0-0·1, 0·(-1)-0·0) = (1,0,0) ✗ should be (-1,0,0)
-        //   Fix: v0=(wx,y+1,wz+1) v1=(wx,y+1,wz) v2=(wx,y,wz) v3=(wx,y,wz+1)
-        //   cross = (0,0,-1)×(0,-1,-1) = (0·(-1)-(-1)·(-1), (-1)·0-0·(-1), 0·(-1)-0·0) = (-1,0,0) ✓
-        //
-        // SOUTH (+Z): viewed from +Z side
-        //   v0=(wx+1,y+1,wz+1) v1=(wx,y+1,wz+1) v2=(wx,y,wz+1) v3=(wx+1,y,wz+1)
-        //   cross = (-1,0,0)×(-1,-1,0) = (0·0-0·(-1), 0·(-1)-(-1)·0, (-1)·(-1)-0·(-1)) = (0,0,1) ✓
-        //
-        // NORTH (-Z): viewed from -Z side
-        //   v0=(wx,y+1,wz) v1=(wx+1,y+1,wz) v2=(wx+1,y,wz) v3=(wx,y,wz)
-        //   cross = (1,0,0)×(1,-1,0) = (0·0-0·(-1), 0·1-1·0, 1·(-1)-0·1) = (0,0,-1) ✓
-
-        let faceData = [
-          { // TOP (+Y)
-            show: shouldShow(0),
-            verts: [
-              [wx,   y+1, wz+1],  // 0: top-left
-              [wx+1, y+1, wz+1],  // 1: top-right
-              [wx+1, y+1, wz],    // 2: bottom-right
-              [wx,   y+1, wz]     // 3: bottom-left
-            ],
-            uv: uvInfo.top, light: 1.0
-          },
-          { // BOTTOM (-Y)
-            show: shouldShow(1),
-            verts: [
-              [wx,   y, wz],      // 0: top-left
-              [wx+1, y, wz],      // 1: top-right
-              [wx+1, y, wz+1],    // 2: bottom-right
-              [wx,   y, wz+1]     // 3: bottom-left
-            ],
-            uv: uvInfo.bottom, light: 0.5
-          },
-          { // EAST (+X)
-            show: shouldShow(2),
-            verts: [
-              [wx+1, y+1, wz],    // 0: top-left
-              [wx+1, y+1, wz+1],  // 1: top-right
-              [wx+1, y,   wz+1],  // 2: bottom-right
-              [wx+1, y,   wz]     // 3: bottom-left
-            ],
-            uv: uvInfo.side, light: 0.8
-          },
-          { // WEST (-X)
-            show: shouldShow(3),
-            verts: [
-              [wx, y+1, wz+1],    // 0: top-left
-              [wx, y+1, wz],      // 1: top-right
-              [wx, y,   wz],      // 2: bottom-right
-              [wx, y,   wz+1]     // 3: bottom-left
-            ],
-            uv: uvInfo.side, light: 0.8
-          },
-          { // SOUTH (+Z)
-            show: shouldShow(4),
-            verts: [
-              [wx+1, y+1, wz+1],  // 0: top-left
-              [wx,   y+1, wz+1],  // 1: top-right
-              [wx,   y,   wz+1],  // 2: bottom-right
-              [wx+1, y,   wz+1]   // 3: bottom-left
-            ],
-            uv: uvInfo.side, light: 0.7
-          },
-          { // NORTH (-Z)
-            show: shouldShow(5),
-            verts: [
-              [wx,   y+1, wz],    // 0: top-left
-              [wx+1, y+1, wz],    // 1: top-right
-              [wx+1, y,   wz],    // 2: bottom-right
-              [wx,   y,   wz]     // 3: bottom-left
-            ],
-            uv: uvInfo.side, light: 0.75
-          }
-        ];
-
-        for(let f of faceData) {
-          if(!f.show) continue;
-          let ao4 = [1,1,1,1];
-          for(let vi=0;vi<4;vi++){
-            let vx=f.verts[vi][0], vy=f.verts[vi][1], vz=f.verts[vi][2];
-            let count = 0;
-            for(let dx=-1;dx<=0;dx++) for(let dy=-1;dy<=0;dy++) for(let dz=-1;dz<=0;dz++){
-              let bx=Math.floor(vx+dx*0.5), by=Math.floor(vy+dy*0.5), bz=Math.floor(vz+dz*0.5);
-              if(isOpaque(getBlock(bx,by,bz))) count++;
+        function pushOpaqueQuad(verts, uvRect, light, ao) {
+            let uvCorners = [
+                [uvRect.u,          uvRect.v + uvRect.vh],
+                [uvRect.u + uvRect.uw, uvRect.v + uvRect.vh],
+                [uvRect.u + uvRect.uw, uvRect.v],
+                [uvRect.u,          uvRect.v]
+            ];
+            let indices = [0,1,2, 0,2,3];
+            for(let idx of indices) {
+                positions.push(verts[idx][0], verts[idx][1], verts[idx][2]);
+                uvs.push(uvCorners[idx][0], uvCorners[idx][1]);
+                lights.push(light);
+                aos.push(ao[idx]);
             }
-            ao4[vi] = 1.0 - count*0.07;
-          }
-          pushQuad(f.verts, f.uv, f.light, ao4, useTransPass);
         }
-      }
+
+        function pushTransparentQuad(verts, uvRect, light, ao) {
+            let uvCorners = [
+                [uvRect.u,          uvRect.v + uvRect.vh],
+                [uvRect.u + uvRect.uw, uvRect.v + uvRect.vh],
+                [uvRect.u + uvRect.uw, uvRect.v],
+                [uvRect.u,          uvRect.v]
+            ];
+            let indices = [0,1,2, 0,2,3];
+            let pos=[], uv=[], li=[], aoArr=[];
+            for(let idx of indices) {
+                pos.push(verts[idx][0], verts[idx][1], verts[idx][2]);
+                uv.push(uvCorners[idx][0], uvCorners[idx][1]);
+                li.push(light);
+                aoArr.push(ao[idx]);
+            }
+            // Центроид квада для сортировки
+            let qcx = (verts[0][0]+verts[1][0]+verts[2][0]+verts[3][0]) * 0.25;
+            let qcy = (verts[0][1]+verts[1][1]+verts[2][1]+verts[3][1]) * 0.25;
+            let qcz = (verts[0][2]+verts[1][2]+verts[2][2]+verts[3][2]) * 0.25;
+            tQuads.push({ pos, uv, li, ao: aoArr, cx: qcx, cy: qcy, cz: qcz });
+        }
+
+        function pushCrossBlock(verts, uvRect, light) {
+            // Крест-блоки — непрозрачная геометрия с двусторонними гранями
+            let uvCorners = [
+                [uvRect.u,          uvRect.v + uvRect.vh],
+                [uvRect.u + uvRect.uw, uvRect.v + uvRect.vh],
+                [uvRect.u + uvRect.uw, uvRect.v],
+                [uvRect.u,          uvRect.v]
+            ];
+            let front = [0,1,2, 0,2,3];
+            let back  = [2,1,0, 3,2,0];
+            for(let idx of [...front, ...back]) {
+                positions.push(verts[idx][0], verts[idx][1], verts[idx][2]);
+                uvs.push(uvCorners[idx][0], uvCorners[idx][1]);
+                lights.push(light);
+                aos.push(1.0);
+            }
+        }
+
+        // ── main loop ─────────────────────────────────────────────────────────────
+        for(let x=0; x<CHUNK_SIZE; x++) {
+            for(let y=0; y<CHUNK_HEIGHT; y++) {
+                for(let z=0; z<CHUNK_SIZE; z++) {
+                    let idx = x*CHUNK_HEIGHT*CHUNK_SIZE + y*CHUNK_SIZE + z;
+                    let block = data[idx];
+                    if(block===BLOCK.AIR) continue;
+
+                    let wx = cx*CHUNK_SIZE+x, wz = cz*CHUNK_SIZE+z;
+                    let isAlpha = ALPHA_BLOCKS.has(block);
+                    let isCross = CROSS_BLOCKS.has(block);
+                    let uvInfo  = textureAtlas.uvMap[block];
+                    if(!uvInfo) continue;
+
+                    // Крест-блоки (трава, цветы, грибы, факелы)
+                    if(isCross) {
+                        let fUV = uvInfo.side;
+                        pushCrossBlock([[wx,y+1,wz],[wx+1,y+1,wz+1],[wx+1,y,wz+1],[wx,y,wz]], fUV, 0.85);
+                        pushCrossBlock([[wx+1,y+1,wz],[wx,y+1,wz+1],[wx,y,wz+1],[wx+1,y,wz]], fUV, 0.85);
+                        continue;
+                    }
+
+                    // Соседи
+                    let nb = [
+                        getBlock(wx, y+1, wz), getBlock(wx, y-1, wz),
+                        getBlock(wx+1, y, wz), getBlock(wx-1, y, wz),
+                        getBlock(wx, y, wz+1), getBlock(wx, y, wz-1),
+                    ];
+
+                    function shouldShow(fi) {
+                        let neighbor = nb[fi];
+                        if(isAlpha) return neighbor===BLOCK.AIR || CROSS_BLOCKS.has(neighbor);
+                        return !isOpaque(neighbor);
+                    }
+
+                    let faceData = [
+                        { show: shouldShow(0), verts: [[wx,y+1,wz+1],[wx+1,y+1,wz+1],[wx+1,y+1,wz],[wx,y+1,wz]], uv: uvInfo.top,    light: 1.0  },
+                        { show: shouldShow(1), verts: [[wx,y,wz],[wx+1,y,wz],[wx+1,y,wz+1],[wx,y,wz+1]],         uv: uvInfo.bottom, light: 0.5  },
+                        { show: shouldShow(2), verts: [[wx+1,y+1,wz],[wx+1,y+1,wz+1],[wx+1,y,wz+1],[wx+1,y,wz]], uv: uvInfo.side,   light: 0.8  },
+                        { show: shouldShow(3), verts: [[wx,y+1,wz+1],[wx,y+1,wz],[wx,y,wz],[wx,y,wz+1]],         uv: uvInfo.side,   light: 0.8  },
+                        { show: shouldShow(4), verts: [[wx+1,y+1,wz+1],[wx,y+1,wz+1],[wx,y,wz+1],[wx+1,y,wz+1]], uv: uvInfo.side,   light: 0.7  },
+                        { show: shouldShow(5), verts: [[wx,y+1,wz],[wx+1,y+1,wz],[wx+1,y,wz],[wx,y,wz]],         uv: uvInfo.side,   light: 0.75 },
+                    ];
+
+                    for(let f of faceData) {
+                        if(!f.show) continue;
+
+                        // Ambient occlusion
+                        let ao4 = [1,1,1,1];
+                        for(let vi=0; vi<4; vi++) {
+                            let vx=f.verts[vi][0], vy=f.verts[vi][1], vz=f.verts[vi][2];
+                            let count=0;
+                            for(let dx=-1;dx<=0;dx++) for(let dy=-1;dy<=0;dy++) for(let dz=-1;dz<=0;dz++){
+                                let bx=Math.floor(vx+dx*0.5), by=Math.floor(vy+dy*0.5), bz=Math.floor(vz+dz*0.5);
+                                if(isOpaque(getBlock(bx,by,bz))) count++;
+                            }
+                            ao4[vi] = 1.0 - count * 0.07;
+                        }
+
+                        if(isAlpha) {
+                            pushTransparentQuad(f.verts, f.uv, f.light, ao4);
+                        } else {
+                            pushOpaqueQuad(f.verts, f.uv, f.light, ao4);
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── упаковка результата ───────────────────────────────────────────────────
+        let result = { opaque: null, tQuads };
+
+        if(positions.length > 0) {
+            result.opaque = {
+                vao:   createVAO(new Float32Array(positions), new Float32Array(uvs),
+                    new Float32Array(lights),    new Float32Array(aos)),
+                count: positions.length / 3
+            };
+        }
+
+        return result;
     }
-  }
 
-  let result = { opaque: null, transparent: null };
-  if(positions.length > 0) {
-    result.opaque = {
-      vao: createVAO(new Float32Array(positions), new Float32Array(uvs), new Float32Array(lights), new Float32Array(aos)),
-      count: positions.length/3
+    // ─── GPU buffer helpers ───────────────────────────────────────────────────────
+    let mainProgram, particleProgram, skyProgram;
+
+    function createVAO(pos, uv, light, ao) {
+        let posBuf   = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);   gl.bufferData(gl.ARRAY_BUFFER, pos,   gl.STATIC_DRAW);
+        let uvBuf    = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, uvBuf);    gl.bufferData(gl.ARRAY_BUFFER, uv,    gl.STATIC_DRAW);
+        let lightBuf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, lightBuf); gl.bufferData(gl.ARRAY_BUFFER, light, gl.STATIC_DRAW);
+        let aoBuf    = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, aoBuf);    gl.bufferData(gl.ARRAY_BUFFER, ao,    gl.STATIC_DRAW);
+        return { posBuf, uvBuf, lightBuf, aoBuf };
+    }
+
+    function freeVAO(vao) {
+        if(!vao) return;
+        gl.deleteBuffer(vao.posBuf); gl.deleteBuffer(vao.uvBuf);
+        gl.deleteBuffer(vao.lightBuf); gl.deleteBuffer(vao.aoBuf);
+    }
+
+    function bindVAO(vao, prog) {
+        let p = prog || mainProgram;
+        let loc;
+        loc = gl.getAttribLocation(p, 'aPos');
+        if(loc>=0){ gl.bindBuffer(gl.ARRAY_BUFFER, vao.posBuf); gl.vertexAttribPointer(loc, 3, gl.FLOAT, false, 0, 0); enableAttrib(loc); }
+        loc = gl.getAttribLocation(p, 'aUV');
+        if(loc>=0){ gl.bindBuffer(gl.ARRAY_BUFFER, vao.uvBuf);  gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0); enableAttrib(loc); }
+        loc = gl.getAttribLocation(p, 'aLight');
+        if(loc>=0){ gl.bindBuffer(gl.ARRAY_BUFFER, vao.lightBuf); gl.vertexAttribPointer(loc, 1, gl.FLOAT, false, 0, 0); enableAttrib(loc); }
+        loc = gl.getAttribLocation(p, 'aAO');
+        if(loc>=0){ gl.bindBuffer(gl.ARRAY_BUFFER, vao.aoBuf); gl.vertexAttribPointer(loc, 1, gl.FLOAT, false, 0, 0); enableAttrib(loc); }
+    }
+
+    // ─── Sorted transparent VAO ──────────────────────────────────────────────────
+    // Строит (или берёт из кэша) отсортированный VAO прозрачных граней чанка.
+    // Пересортировка происходит только если камера сдвинулась дальше SORT_THRESHOLD.
+    function buildSortedTransparentVAO(key, eyeX, eyeY, eyeZ) {
+        let mesh = chunkMeshes[key];
+        if(!mesh || !mesh.tQuads || mesh.tQuads.length === 0) return null;
+
+        let cache = transparentBufferCache[key];
+        if(cache) {
+            let dx = eyeX - cache.ex, dy = eyeY - cache.ey, dz = eyeZ - cache.ez;
+            if(dx*dx + dy*dy + dz*dz < SORT_THRESHOLD * SORT_THRESHOLD) {
+                return cache; // камера почти не сдвинулась — используем старый буфер
+            }
+            // Освобождаем устаревший буфер
+            freeVAO(cache.vao);
+        }
+
+        // Сортируем квады back-to-front (дальние рисуются первыми)
+        let quads = mesh.tQuads.slice();
+        quads.sort((a, b) => {
+            let da = (a.cx-eyeX)**2 + (a.cy-eyeY)**2 + (a.cz-eyeZ)**2;
+            let db = (b.cx-eyeX)**2 + (b.cy-eyeY)**2 + (b.cz-eyeZ)**2;
+            return db - da;
+        });
+
+        let pos=[], uv=[], li=[], ao=[];
+        for(let q of quads) {
+            for(let v of q.pos) pos.push(v);
+            for(let v of q.uv)  uv.push(v);
+            for(let v of q.li)  li.push(v);
+            for(let v of q.ao)  ao.push(v);
+        }
+
+        let vao = createVAO(
+            new Float32Array(pos), new Float32Array(uv),
+            new Float32Array(li),  new Float32Array(ao)
+        );
+        let result = { vao, count: pos.length / 3, ex: eyeX, ey: eyeY, ez: eyeZ };
+        transparentBufferCache[key] = result;
+        return result;
+    }
+
+    // ─── Particles ───────────────────────────────────────────────────────────────
+    let particles = [];
+
+    function spawnParticles(x, y, z, block, count=8) {
+        for(let i=0; i<count; i++)
+            particles.push({
+                x: x+0.5+(Math.random()-0.5)*0.5, y: y+0.5+(Math.random()-0.5)*0.5, z: z+0.5+(Math.random()-0.5)*0.5,
+                vx: (Math.random()-0.5)*3, vy: Math.random()*4+1, vz: (Math.random()-0.5)*3,
+                life: 0.5+Math.random()*0.5, maxLife: 1, size: 2+Math.random()*3,
+                r: 0.4+Math.random()*0.4, g: 0.3+Math.random()*0.3, b: 0.2+Math.random()*0.2,
+            });
+    }
+
+    function updateParticles(dt) {
+        for(let i=particles.length-1; i>=0; i--) {
+            let p=particles[i];
+            p.vy-=15*dt; p.x+=p.vx*dt; p.y+=p.vy*dt; p.z+=p.vz*dt; p.life-=dt;
+            if(p.life<=0) particles.splice(i,1);
+        }
+    }
+
+    // ─── Player ───────────────────────────────────────────────────────────────────
+    let player = {
+        x:0, y:50, z:0, vx:0, vy:0, vz:0,
+        yaw:0, pitch:0, onGround:false, flying:false, speed:5.5, selectedSlot:0,
+        inventory: [
+            {block:BLOCK.GRASS,count:64},{block:BLOCK.DIRT,count:64},{block:BLOCK.STONE,count:64},
+            {block:BLOCK.WOOD,count:64},{block:BLOCK.PLANKS,count:64},{block:BLOCK.COBBLE,count:64},
+            {block:BLOCK.BRICK,count:64},{block:BLOCK.GLASS,count:64},{block:BLOCK.TORCH,count:64},
+        ],
+        breakProgress:0, breakTarget:null, stepTimer:0,
     };
-  }
-  if(tPositions.length > 0) {
-    result.transparent = {
-      vao: createVAO(new Float32Array(tPositions), new Float32Array(tUvs), new Float32Array(tLights), new Float32Array(tAos)),
-      count: tPositions.length/3
-    };
-  }
-  return result;
-}
 
-let mainProgram, particleProgram, skyProgram;
+    function spawnPlayer() {
+        let h = getTerrainHeight(0, 0);
+        player.x=0.5; player.y=h+2; player.z=0.5;
+    }
 
-function createVAO(pos, uv, light, ao) {
-  let posBuf = gl.createBuffer();
-  gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);
-  gl.bufferData(gl.ARRAY_BUFFER, pos, gl.STATIC_DRAW);
-  let uvBuf = gl.createBuffer();
-  gl.bindBuffer(gl.ARRAY_BUFFER, uvBuf);
-  gl.bufferData(gl.ARRAY_BUFFER, uv, gl.STATIC_DRAW);
-  let lightBuf = gl.createBuffer();
-  gl.bindBuffer(gl.ARRAY_BUFFER, lightBuf);
-  gl.bufferData(gl.ARRAY_BUFFER, light, gl.STATIC_DRAW);
-  let aoBuf = gl.createBuffer();
-  gl.bindBuffer(gl.ARRAY_BUFFER, aoBuf);
-  gl.bufferData(gl.ARRAY_BUFFER, ao, gl.STATIC_DRAW);
-  return { posBuf, uvBuf, lightBuf, aoBuf };
-}
+    let keys = {};
+    let mouse = {dx:0, dy:0, left:false, right:false, rightUsed:false};
+    let pointerLocked = false;
 
-function bindVAO(vao, prog) {
-  let p = prog || mainProgram;
-  let loc;
-  loc = gl.getAttribLocation(p, 'aPos');
-  gl.bindBuffer(gl.ARRAY_BUFFER, vao.posBuf);
-  gl.vertexAttribPointer(loc, 3, gl.FLOAT, false, 0, 0);
-  gl.enableVertexAttribArray(loc);
-  loc = gl.getAttribLocation(p, 'aUV');
-  gl.bindBuffer(gl.ARRAY_BUFFER, vao.uvBuf);
-  gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
-  gl.enableVertexAttribArray(loc);
-  loc = gl.getAttribLocation(p, 'aLight');
-  gl.bindBuffer(gl.ARRAY_BUFFER, vao.lightBuf);
-  gl.vertexAttribPointer(loc, 1, gl.FLOAT, false, 0, 0);
-  gl.enableVertexAttribArray(loc);
-  loc = gl.getAttribLocation(p, 'aAO');
-  gl.bindBuffer(gl.ARRAY_BUFFER, vao.aoBuf);
-  gl.vertexAttribPointer(loc, 1, gl.FLOAT, false, 0, 0);
-  gl.enableVertexAttribArray(loc);
-}
-
-let particles = [];
-
-function spawnParticles(x, y, z, block, count=8) {
-  for(let i=0;i<count;i++) {
-    particles.push({
-      x: x+0.5+(Math.random()-0.5)*0.5,
-      y: y+0.5+(Math.random()-0.5)*0.5,
-      z: z+0.5+(Math.random()-0.5)*0.5,
-      vx: (Math.random()-0.5)*3,
-      vy: Math.random()*4+1,
-      vz: (Math.random()-0.5)*3,
-      life: 0.5+Math.random()*0.5,
-      maxLife: 1,
-      size: 2+Math.random()*3,
-      r: 0.4+Math.random()*0.4,
-      g: 0.3+Math.random()*0.3,
-      b: 0.2+Math.random()*0.2,
+    document.addEventListener('keydown', e => {
+        keys[e.code]=true;
+        if(e.code==='KeyF') player.flying=!player.flying;
+        if(e.code>='Digit1'&&e.code<='Digit9'){ player.selectedSlot=parseInt(e.code[5])-1; updateHotbar(); }
     });
-  }
-}
-
-function updateParticles(dt) {
-  for(let i=particles.length-1; i>=0; i--) {
-    let p = particles[i];
-    p.vy -= 15*dt;
-    p.x+=p.vx*dt; p.y+=p.vy*dt; p.z+=p.vz*dt;
-    p.life-=dt;
-    if(p.life<=0) particles.splice(i,1);
-  }
-}
-
-let player = {
-  x: 0, y: 50, z: 0,
-  vx: 0, vy: 0, vz: 0,
-  yaw: 0, pitch: 0,
-  onGround: false,
-  flying: false,
-  speed: 5.5,
-  selectedSlot: 0,
-  inventory: [
-    {block: BLOCK.GRASS, count: 64},
-    {block: BLOCK.DIRT, count: 64},
-    {block: BLOCK.STONE, count: 64},
-    {block: BLOCK.WOOD, count: 64},
-    {block: BLOCK.PLANKS, count: 64},
-    {block: BLOCK.COBBLE, count: 64},
-    {block: BLOCK.BRICK, count: 64},
-    {block: BLOCK.GLASS, count: 64},
-    {block: BLOCK.TORCH, count: 64},
-  ],
-  breakProgress: 0,
-  breakTarget: null,
-  stepTimer: 0,
-};
-
-function spawnPlayer() {
-  let h = getTerrainHeight(0, 0);
-  player.x = 0.5; player.y = h + 2; player.z = 0.5;
-}
-
-let keys = {};
-let mouse = {dx: 0, dy: 0, left: false, right: false, rightUsed: false};
-let pointerLocked = false;
-
-document.addEventListener('keydown', e => {
-  keys[e.code] = true;
-  if(e.code === 'KeyF') player.flying = !player.flying;
-  if(e.code >= 'Digit1' && e.code <= 'Digit9') {
-    player.selectedSlot = parseInt(e.code[5]) - 1;
-    updateHotbar();
-  }
-});
-document.addEventListener('keyup', e => keys[e.code] = false);
-
-canvas.addEventListener('click', () => {
-  if(!pointerLocked) {
-    canvas.requestPointerLock();
-    if(!audioCtx) initAudio();
-  }
-});
-
-document.addEventListener('pointerlockchange', () => {
-  pointerLocked = document.pointerLockElement === canvas;
-});
-
-document.addEventListener('mousemove', e => {
-  if(pointerLocked) {
-    mouse.dx += e.movementX;
-    mouse.dy += e.movementY;
-  }
-});
-
-document.addEventListener('mousedown', e => {
-  if(!pointerLocked) return;
-  if(e.button === 0) mouse.left = true;
-  if(e.button === 2) { mouse.right = true; mouse.rightUsed = false; }
-});
-document.addEventListener('mouseup', e => {
-  if(e.button === 0) { mouse.left = false; player.breakProgress = 0; player.breakTarget = null; }
-  if(e.button === 2) mouse.right = false;
-});
-document.addEventListener('contextmenu', e => e.preventDefault());
-
-document.addEventListener('wheel', e => {
-  if(e.deltaY > 0) player.selectedSlot = (player.selectedSlot + 1) % 9;
-  else player.selectedSlot = (player.selectedSlot + 8) % 9;
-  updateHotbar();
-});
-
-function raycast(ox, oy, oz, dx, dy, dz, maxDist) {
-  let x = Math.floor(ox), y = Math.floor(oy), z = Math.floor(oz);
-  let stepX = dx>0?1:-1, stepY = dy>0?1:-1, stepZ = dz>0?1:-1;
-  let tMaxX = dx!==0 ? ((dx>0?x+1:x)-ox)/dx : 1e10;
-  let tMaxY = dy!==0 ? ((dy>0?y+1:y)-oy)/dy : 1e10;
-  let tMaxZ = dz!==0 ? ((dz>0?z+1:z)-oz)/dz : 1e10;
-  let tDeltaX = dx!==0 ? stepX/dx : 1e10;
-  let tDeltaY = dy!==0 ? stepY/dy : 1e10;
-  let tDeltaZ = dz!==0 ? stepZ/dz : 1e10;
-  let face = [0,0,0];
-  for(let i=0; i<maxDist*4; i++) {
-    let block = getBlock(x, y, z);
-    if(block !== BLOCK.AIR && block !== BLOCK.WATER) {
-      return { x, y, z, block, face };
-    }
-    if(tMaxX < tMaxY) {
-      if(tMaxX < tMaxZ) { x += stepX; tMaxX += tDeltaX; face = [-stepX,0,0]; }
-      else { z += stepZ; tMaxZ += tDeltaZ; face = [0,0,-stepZ]; }
-    } else {
-      if(tMaxY < tMaxZ) { y += stepY; tMaxY += tDeltaY; face = [0,-stepY,0]; }
-      else { z += stepZ; tMaxZ += tDeltaZ; face = [0,0,-stepZ]; }
-    }
-    let t = Math.min(tMaxX,tMaxY,tMaxZ);
-    if(t > maxDist) break;
-  }
-  return null;
-}
-
-function collide(px, py, pz, vx, vy, vz, dt) {
-  let w = PLAYER_WIDTH;
-  let h = PLAYER_HEIGHT;
-  function isSolid(bx,by,bz) {
-    return !NON_SOLID.has(getBlock(bx, by, bz));
-  }
-  function checkOverlap(px,py,pz) {
-    let minBX = Math.floor(px-w), maxBX = Math.floor(px+w);
-    let minBY = Math.floor(py), maxBY = Math.floor(py+h);
-    let minBZ = Math.floor(pz-w), maxBZ = Math.floor(pz+w);
-    for(let bx=minBX;bx<=maxBX;bx++)
-      for(let by=minBY;by<=maxBY;by++)
-        for(let bz=minBZ;bz<=maxBZ;bz++) {
-          if(!isSolid(bx,by,bz)) continue;
-          let ox = Math.min(px+w, bx+1) - Math.max(px-w, bx);
-          let oy = Math.min(py+h, by+1) - Math.max(py, by);
-          let oz = Math.min(pz+w, bz+1) - Math.max(pz, bz);
-          if(ox>0 && oy>0 && oz>0) return true;
-        }
-    return false;
-  }
-  let onGround = false;
-  let ny = py + vy*dt;
-  if(!checkOverlap(px, ny, pz)) { py = ny; }
-  else { if(vy < 0) { onGround = true; py = Math.floor(py); } else if(vy > 0) { py = Math.ceil(py + h) - h - 0.001; } vy = 0; }
-  let nx = px + vx*dt;
-  if(!checkOverlap(nx, py, pz)) { px = nx; } else { vx = 0; }
-  let nz = pz + vz*dt;
-  if(!checkOverlap(px, py, nz)) { pz = nz; } else { vz = 0; }
-  return { x:px, y:py, z:pz, vx, vy, vz, onGround };
-}
-
-function getLookDir() {
-  return [
-    -Math.sin(player.yaw) * Math.cos(player.pitch),
-    Math.sin(player.pitch),
-    -Math.cos(player.yaw) * Math.cos(player.pitch)
-  ];
-}
-
-function updatePlayer(dt) {
-  let sens = 0.002;
-  player.yaw -= mouse.dx * sens;
-  player.pitch -= mouse.dy * sens;
-  player.pitch = Math.max(-Math.PI/2+0.01, Math.min(Math.PI/2-0.01, player.pitch));
-  mouse.dx = 0;
-  mouse.dy = 0;
-
-  let forward = [-Math.sin(player.yaw), 0, -Math.cos(player.yaw)];
-  let right = [Math.cos(player.yaw), 0, -Math.sin(player.yaw)];
-
-  let mx=0, mz=0, my=0;
-  if(keys['KeyW']) { mx+=forward[0]; mz+=forward[2]; }
-  if(keys['KeyS']) { mx-=forward[0]; mz-=forward[2]; }
-  if(keys['KeyA']) { mx-=right[0]; mz-=right[2]; }
-  if(keys['KeyD']) { mx+=right[0]; mz+=right[2]; }
-
-  let len = Math.sqrt(mx*mx+mz*mz);
-  if(len>0) { mx/=len; mz/=len; }
-
-  let speed = player.speed * (keys['ShiftLeft']?1.5:1);
-
-  if(player.flying) {
-    if(keys['Space']) my = speed;
-    if(keys['KeyQ']) my = -speed;
-    player.vx = mx*speed; player.vy = my; player.vz = mz*speed;
-    player.x += player.vx*dt; player.y += player.vy*dt; player.z += player.vz*dt;
-    player.onGround = false;
-  } else {
-    player.vx = mx * speed;
-    player.vz = mz * speed;
-    player.vy += GRAVITY * dt;
-    if(keys['Space'] && player.onGround) { player.vy = JUMP_VEL; player.onGround = false; }
-    let inWater = getBlock(Math.floor(player.x), Math.floor(player.y+0.5), Math.floor(player.z)) === BLOCK.WATER;
-    if(inWater) {
-      player.vy *= 0.95; player.vx *= 0.8; player.vz *= 0.8;
-      if(keys['Space']) player.vy = 3;
-    }
-    let result = collide(player.x, player.y, player.z, player.vx, player.vy, player.vz, dt);
-    player.x = result.x; player.y = result.y; player.z = result.z;
-    player.vy = result.vy; player.onGround = result.onGround;
-  }
-
-  if(player.onGround && (mx!==0||mz!==0)) {
-    player.stepTimer += dt * speed;
-    if(player.stepTimer > 2.2) { playSound('step'); player.stepTimer = 0; }
-  }
-
-  if(player.y < -10) { player.y = 50; player.vy = 0; }
-
-  let lookDir = getLookDir();
-  let eyeY = player.y + PLAYER_HEIGHT - 0.2;
-  let hit = raycast(player.x, eyeY, player.z, lookDir[0], lookDir[1], lookDir[2], REACH);
-
-  if(mouse.left && hit) {
-    let targetKey = hit.x+','+hit.y+','+hit.z;
-    if(player.breakTarget !== targetKey) { player.breakTarget = targetKey; player.breakProgress = 0; }
-    let hardness = BLOCK_HARDNESS[hit.block] || 1;
-    player.breakProgress += dt / hardness;
-    if(((player.breakProgress - dt/hardness) % 0.3) > (player.breakProgress % 0.3)) playSound('hit');
-    if(player.breakProgress >= 1) {
-      setBlock(hit.x, hit.y, hit.z, BLOCK.AIR);
-      spawnParticles(hit.x, hit.y, hit.z, hit.block);
-      playSound('break');
-      player.breakProgress = 0;
-      player.breakTarget = null;
-    }
-  }
-
-  if(mouse.right && !mouse.rightUsed && hit) {
-    mouse.rightUsed = true;
-    let px = hit.x+hit.face[0], py = hit.y+hit.face[1], pz = hit.z+hit.face[2];
-    let slot = player.inventory[player.selectedSlot];
-    if(slot && slot.count > 0) {
-      let ppMinX = player.x-PLAYER_WIDTH, ppMaxX = player.x+PLAYER_WIDTH;
-      let ppMinY = player.y, ppMaxY = player.y+PLAYER_HEIGHT;
-      let ppMinZ = player.z-PLAYER_WIDTH, ppMaxZ = player.z+PLAYER_WIDTH;
-      let bOverlap = (px+1>ppMinX && px<ppMaxX && py+1>ppMinY && py<ppMaxY && pz+1>ppMinZ && pz<ppMaxZ);
-      if(!bOverlap) {
-        setBlock(px, py, pz, slot.block);
-        slot.count--;
-        playSound('place');
+    document.addEventListener('keyup', e => keys[e.code]=false);
+    canvas.addEventListener('click', () => { if(!pointerLocked){ canvas.requestPointerLock(); if(!audioCtx) initAudio(); } });
+    document.addEventListener('pointerlockchange', () => { pointerLocked=document.pointerLockElement===canvas; });
+    document.addEventListener('mousemove', e => { if(pointerLocked){ mouse.dx+=e.movementX; mouse.dy+=e.movementY; } });
+    document.addEventListener('mousedown', e => {
+        if(!pointerLocked) return;
+        if(e.button===0) mouse.left=true;
+        if(e.button===2){ mouse.right=true; mouse.rightUsed=false; }
+    });
+    document.addEventListener('mouseup', e => {
+        if(e.button===0){ mouse.left=false; player.breakProgress=0; player.breakTarget=null; }
+        if(e.button===2) mouse.right=false;
+    });
+    document.addEventListener('contextmenu', e => e.preventDefault());
+    document.addEventListener('wheel', e => {
+        if(e.deltaY>0) player.selectedSlot=(player.selectedSlot+1)%9;
+        else player.selectedSlot=(player.selectedSlot+8)%9;
         updateHotbar();
-      }
+    });
+
+    function raycast(ox, oy, oz, dx, dy, dz, maxDist) {
+        let x=Math.floor(ox),y=Math.floor(oy),z=Math.floor(oz);
+        let stepX=dx>0?1:-1, stepY=dy>0?1:-1, stepZ=dz>0?1:-1;
+        let tMaxX=dx!==0?((dx>0?x+1:x)-ox)/dx:1e10;
+        let tMaxY=dy!==0?((dy>0?y+1:y)-oy)/dy:1e10;
+        let tMaxZ=dz!==0?((dz>0?z+1:z)-oz)/dz:1e10;
+        let tDeltaX=dx!==0?stepX/dx:1e10;
+        let tDeltaY=dy!==0?stepY/dy:1e10;
+        let tDeltaZ=dz!==0?stepZ/dz:1e10;
+        let face=[0,0,0];
+        for(let i=0; i<maxDist*4; i++) {
+            let block=getBlock(x,y,z);
+            if(block!==BLOCK.AIR&&block!==BLOCK.WATER) return {x,y,z,block,face};
+            if(tMaxX<tMaxY){
+                if(tMaxX<tMaxZ){ x+=stepX; tMaxX+=tDeltaX; face=[-stepX,0,0]; }
+                else            { z+=stepZ; tMaxZ+=tDeltaZ; face=[0,0,-stepZ]; }
+            } else {
+                if(tMaxY<tMaxZ){ y+=stepY; tMaxY+=tDeltaY; face=[0,-stepY,0]; }
+                else            { z+=stepZ; tMaxZ+=tDeltaZ; face=[0,0,-stepZ]; }
+            }
+            let t=Math.min(tMaxX,tMaxY,tMaxZ);
+            if(t>maxDist) break;
+        }
+        return null;
     }
-  }
-}
 
-function updateHotbar() {
-  let hotbar = document.getElementById('hotbar');
-  hotbar.innerHTML = '';
-  for(let i=0;i<9;i++) {
-    let slot = document.createElement('div');
-    slot.className = 'slot' + (i===player.selectedSlot?' active':'');
-    let item = player.inventory[i];
-    if(item && item.count > 0) {
-      let c = document.createElement('canvas');
-      c.width = 16; c.height = 16;
-      let ctx = c.getContext('2d');
-      let pixels = generateBlockTexture(item.block, 'side');
-      let imgData = ctx.createImageData(16,16);
-      imgData.data.set(pixels);
-      ctx.putImageData(imgData,0,0);
-      slot.appendChild(c);
-      let cnt = document.createElement('span');
-      cnt.className = 'count';
-      cnt.textContent = item.count;
-      slot.appendChild(cnt);
+    function collide(px, py, pz, vx, vy, vz, dt) {
+        const w = PLAYER_WIDTH;
+        const h = PLAYER_HEIGHT;
+        const EPSILON = 0.0001;
+
+        function isSolid(bx, by, bz) {
+            return !NON_SOLID.has(getBlock(Math.floor(bx), Math.floor(by), Math.floor(bz)));
+        }
+        function getOverlapping(px, py, pz) {
+            let result=[];
+            let minBX=Math.floor(px-w), maxBX=Math.floor(px+w-EPSILON);
+            let minBY=Math.floor(py),   maxBY=Math.floor(py+h-EPSILON);
+            let minBZ=Math.floor(pz-w), maxBZ=Math.floor(pz+w-EPSILON);
+            for(let bx=minBX;bx<=maxBX;bx++) for(let by=minBY;by<=maxBY;by++) for(let bz=minBZ;bz<=maxBZ;bz++){
+                if(!isSolid(bx,by,bz)) continue;
+                let ox=Math.min(px+w,bx+1)-Math.max(px-w,bx);
+                let oy=Math.min(py+h,by+1)-Math.max(py,by);
+                let oz=Math.min(pz+w,bz+1)-Math.max(pz-w,bz);
+                if(ox>0&&oy>0&&oz>0) result.push({bx,by,bz,ox,oy,oz});
+            }
+            return result;
+        }
+        function hasOverlap(px, py, pz) { return getOverlapping(px,py,pz).length>0; }
+
+        let onGround=false;
+
+        let ny=py+vy*dt;
+        if(!hasOverlap(px,ny,pz)){ py=ny; }
+        else {
+            if(vy<0){
+                let blocks=getOverlapping(px,ny,pz); let maxTop=py;
+                for(let b of blocks) maxTop=Math.max(maxTop,b.by+1);
+                py=maxTop; onGround=true;
+            } else if(vy>0){
+                let blocks=getOverlapping(px,ny,pz); let minBot=ny+h;
+                for(let b of blocks) minBot=Math.min(minBot,b.by);
+                py=minBot-h-EPSILON;
+            }
+            vy=0;
+        }
+
+        let nx=px+vx*dt;
+        if(!hasOverlap(nx,py,pz)){ px=nx; }
+        else {
+            if(vx>0){ let blocks=getOverlapping(nx,py,pz); let mf=nx+w; for(let b of blocks) mf=Math.min(mf,b.bx); px=mf-w-EPSILON; }
+            else if(vx<0){ let blocks=getOverlapping(nx,py,pz); let mf=nx-w; for(let b of blocks) mf=Math.max(mf,b.bx+1); px=mf+w+EPSILON; }
+            vx=0;
+        }
+
+        let nz=pz+vz*dt;
+        if(!hasOverlap(px,py,nz)){ pz=nz; }
+        else {
+            if(vz>0){ let blocks=getOverlapping(px,py,nz); let mf=nz+w; for(let b of blocks) mf=Math.min(mf,b.bz); pz=mf-w-EPSILON; }
+            else if(vz<0){ let blocks=getOverlapping(px,py,nz); let mf=nz-w; for(let b of blocks) mf=Math.max(mf,b.bz+1); pz=mf+w+EPSILON; }
+            vz=0;
+        }
+
+        if(!onGround && hasOverlap(px,py-0.05,pz) && vy<=0) onGround=true;
+
+        return {x:px, y:py, z:pz, vx, vy, vz, onGround};
     }
-    hotbar.appendChild(slot);
-  }
-}
 
-let glTexture;
-let skyVBO;
-let gameTime = 0;
-
-function initGL() {
-  canvas.width = window.innerWidth;
-  canvas.height = window.innerHeight;
-  gl.viewport(0,0,canvas.width,canvas.height);
-
-  mainProgram = createProgram(VS_SRC, FS_SRC);
-  particleProgram = createProgram(VS_PARTICLE, FS_PARTICLE);
-  skyProgram = createProgram(VS_SKY, FS_SKY);
-
-  textureAtlas = buildTextureAtlas();
-  glTexture = gl.createTexture();
-  gl.bindTexture(gl.TEXTURE_2D, glTexture);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, textureAtlas.width, textureAtlas.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, textureAtlas.data);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-
-  skyVBO = gl.createBuffer();
-  gl.bindBuffer(gl.ARRAY_BUFFER, skyVBO);
-  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1,1,-1,1,1,-1,-1,1,1,-1,1]), gl.STATIC_DRAW);
-
-  gl.enable(gl.DEPTH_TEST);
-  gl.enable(gl.CULL_FACE);
-  gl.cullFace(gl.BACK);
-  gl.frontFace(gl.CCW);
-}
-
-function render() {
-  if(canvas.width !== window.innerWidth || canvas.height !== window.innerHeight) {
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
-    gl.viewport(0, 0, canvas.width, canvas.height);
-  }
-
-  let aspect = canvas.width / canvas.height;
-  let proj = mat4Perspective(70 * Math.PI/180, aspect, 0.1, 200);
-
-  let eyeX = player.x, eyeY = player.y + PLAYER_HEIGHT - 0.2, eyeZ = player.z;
-  let lookDir = getLookDir();
-  let view = mat4LookAt(
-    [eyeX, eyeY, eyeZ],
-    [eyeX+lookDir[0], eyeY+lookDir[1], eyeZ+lookDir[2]],
-    [0, 1, 0]
-  );
-  let mvp = mat4Mul(proj, view);
-  let invVP = mat4Invert(mvp);
-
-  let dayTime = Math.sin(gameTime * 0.02) * 0.5 + 0.5;
-  let fogR = 0.18+dayTime*0.47, fogG = 0.25+dayTime*0.5, fogB = 0.4+dayTime*0.45;
-
-  gl.clearColor(fogR, fogG, fogB, 1);
-  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-
-  // Sky
-  gl.depthMask(false);
-  gl.disable(gl.CULL_FACE);
-  gl.useProgram(skyProgram);
-  let skyPosLoc = gl.getAttribLocation(skyProgram, 'aPos');
-  gl.bindBuffer(gl.ARRAY_BUFFER, skyVBO);
-  gl.vertexAttribPointer(skyPosLoc, 2, gl.FLOAT, false, 0, 0);
-  gl.enableVertexAttribArray(skyPosLoc);
-  gl.uniform1f(gl.getUniformLocation(skyProgram, 'uTime'), gameTime);
-  gl.uniformMatrix4fv(gl.getUniformLocation(skyProgram, 'uInvVP'), false, invVP);
-  gl.drawArrays(gl.TRIANGLES, 0, 6);
-  gl.disableVertexAttribArray(skyPosLoc);
-  gl.depthMask(true);
-  gl.enable(gl.CULL_FACE);
-
-  // Opaque pass
-  gl.useProgram(mainProgram);
-  gl.uniformMatrix4fv(gl.getUniformLocation(mainProgram, 'uMVP'), false, mvp);
-  gl.uniform3f(gl.getUniformLocation(mainProgram, 'uFogColor'), fogR, fogG, fogB);
-  gl.activeTexture(gl.TEXTURE0);
-  gl.bindTexture(gl.TEXTURE_2D, glTexture);
-  gl.uniform1i(gl.getUniformLocation(mainProgram, 'uTex'), 0);
-
-  let triCount = 0;
-  for(let key in chunkMeshes) {
-    let mesh = chunkMeshes[key];
-    if(mesh && mesh.opaque) {
-      bindVAO(mesh.opaque.vao, mainProgram);
-      gl.drawArrays(gl.TRIANGLES, 0, mesh.opaque.count);
-      triCount += mesh.opaque.count;
+    function getLookDir() {
+        return [
+            -Math.sin(player.yaw)*Math.cos(player.pitch),
+            Math.sin(player.pitch),
+            -Math.cos(player.yaw)*Math.cos(player.pitch)
+        ];
     }
-  }
-
-  // Transparent pass
-  gl.enable(gl.BLEND);
-  gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-  gl.depthMask(false);
-  gl.disable(gl.CULL_FACE);
-
-  for(let key in chunkMeshes) {
-    let mesh = chunkMeshes[key];
-    if(mesh && mesh.transparent) {
-      bindVAO(mesh.transparent.vao, mainProgram);
-      gl.drawArrays(gl.TRIANGLES, 0, mesh.transparent.count);
-      triCount += mesh.transparent.count;
+    function getEyePosition() {
+        return [player.x, player.y + PLAYER_EYE_OFFSET, player.z];
     }
-  }
 
-  // Particles
-  if(particles.length > 0) {
-    gl.useProgram(particleProgram);
-    gl.uniformMatrix4fv(gl.getUniformLocation(particleProgram, 'uMVP'), false, mvp);
-    gl.uniform3f(gl.getUniformLocation(particleProgram, 'uFogColor'), fogR, fogG, fogB);
-    let pArr = [], cArr = [], sArr = [];
-    for(let p of particles) {
-      pArr.push(p.x, p.y, p.z);
-      cArr.push(p.r, p.g, p.b, p.life/p.maxLife);
-      sArr.push(p.size);
+    function updatePlayer(dt) {
+        let sens=0.002;
+        player.yaw  -= mouse.dx*sens;
+        player.pitch -= mouse.dy*sens;
+        player.pitch=Math.max(-Math.PI/2+0.01, Math.min(Math.PI/2-0.01, player.pitch));
+        mouse.dx=0; mouse.dy=0;
+
+        let forward=[-Math.sin(player.yaw),0,-Math.cos(player.yaw)];
+        let right  =[ Math.cos(player.yaw),0,-Math.sin(player.yaw)];
+        let mx=0, mz=0, my=0;
+        if(keys['KeyW']){ mx+=forward[0]; mz+=forward[2]; } if(keys['KeyS']){ mx-=forward[0]; mz-=forward[2]; }
+        if(keys['KeyA']){ mx-=right[0];   mz-=right[2];   } if(keys['KeyD']){ mx+=right[0];   mz+=right[2];   }
+        let len=Math.sqrt(mx*mx+mz*mz); if(len>0){ mx/=len; mz/=len; }
+        let speed=player.speed*(keys['ShiftLeft']?1.5:1);
+
+        if(player.flying) {
+            if(keys['Space']) my=speed; if(keys['KeyQ']) my=-speed;
+            player.vx=mx*speed; player.vy=my; player.vz=mz*speed;
+            player.x+=player.vx*dt; player.y+=player.vy*dt; player.z+=player.vz*dt;
+            player.onGround=false;
+        } else {
+            player.vx=mx*speed; player.vz=mz*speed; player.vy+=GRAVITY*dt;
+            if(keys['Space']&&player.onGround){ player.vy=JUMP_VEL; player.onGround=false; }
+            let inWater=getBlock(Math.floor(player.x),Math.floor(player.y+0.5),Math.floor(player.z))===BLOCK.WATER;
+            if(inWater){ player.vy*=0.95; player.vx*=0.8; player.vz*=0.8; if(keys['Space']) player.vy=3; }
+            let result=collide(player.x,player.y,player.z,player.vx,player.vy,player.vz,dt);
+            player.x=result.x; player.y=result.y; player.z=result.z; player.vy=result.vy; player.onGround=result.onGround;
+        }
+
+        if(player.onGround&&(mx!==0||mz!==0)){
+            player.stepTimer+=dt*speed;
+            if(player.stepTimer>2.2){ playSound('step'); player.stepTimer=0; }
+        }
+        if(player.y<-10){ player.y=50; player.vy=0; }
+
+        let lookDir=getLookDir();
+        let [eyeX,eyeY,eyeZ]=getEyePosition();
+        let hit=raycast(eyeX,eyeY,eyeZ,lookDir[0],lookDir[1],lookDir[2],REACH);
+
+        if(mouse.left&&hit) {
+            let targetKey=hit.x+','+hit.y+','+hit.z;
+            if(player.breakTarget!==targetKey){ player.breakTarget=targetKey; player.breakProgress=0; }
+            let hardness=BLOCK_HARDNESS[hit.block]||1;
+            player.breakProgress+=dt/hardness;
+            if(((player.breakProgress-dt/hardness)%0.3)>(player.breakProgress%0.3)) playSound('hit');
+            if(player.breakProgress>=1){
+                setBlock(hit.x,hit.y,hit.z,BLOCK.AIR);
+                spawnParticles(hit.x,hit.y,hit.z,hit.block);
+                playSound('break'); player.breakProgress=0; player.breakTarget=null;
+            }
+        }
+
+        if(mouse.right&&!mouse.rightUsed&&hit) {
+            mouse.rightUsed=true;
+            let px=hit.x+hit.face[0], py=hit.y+hit.face[1], pz=hit.z+hit.face[2];
+            let slot=player.inventory[player.selectedSlot];
+            if(slot&&slot.count>0){
+                let ppMinX=player.x-PLAYER_WIDTH, ppMaxX=player.x+PLAYER_WIDTH;
+                let ppMinY=player.y,              ppMaxY=player.y+PLAYER_HEIGHT;
+                let ppMinZ=player.z-PLAYER_WIDTH, ppMaxZ=player.z+PLAYER_WIDTH;
+                let bOverlap=(px+1>ppMinX&&px<ppMaxX&&py+1>ppMinY&&py<ppMaxY&&pz+1>ppMinZ&&pz<ppMaxZ);
+                if(!bOverlap){ setBlock(px,py,pz,slot.block); slot.count--; playSound('place'); updateHotbar(); }
+            }
+        }
     }
-    let pBuf = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, pBuf);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(pArr), gl.DYNAMIC_DRAW);
-    let pLoc = gl.getAttribLocation(particleProgram, 'aPos');
-    gl.vertexAttribPointer(pLoc, 3, gl.FLOAT, false, 0, 0);
-    gl.enableVertexAttribArray(pLoc);
-    let cBuf = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, cBuf);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(cArr), gl.DYNAMIC_DRAW);
-    let cLoc = gl.getAttribLocation(particleProgram, 'aColor');
-    gl.vertexAttribPointer(cLoc, 4, gl.FLOAT, false, 0, 0);
-    gl.enableVertexAttribArray(cLoc);
-    let sBuf = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, sBuf);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(sArr), gl.DYNAMIC_DRAW);
-    let sLoc = gl.getAttribLocation(particleProgram, 'aSize');
-    gl.vertexAttribPointer(sLoc, 1, gl.FLOAT, false, 0, 0);
-    gl.enableVertexAttribArray(sLoc);
-    gl.drawArrays(gl.POINTS, 0, particles.length);
-    gl.deleteBuffer(pBuf); gl.deleteBuffer(cBuf); gl.deleteBuffer(sBuf);
-  }
 
-  gl.disable(gl.BLEND);
-  gl.depthMask(true);
-  gl.enable(gl.CULL_FACE);
+    function updateHotbar() {
+        let hotbar=document.getElementById('hotbar'); hotbar.innerHTML='';
+        for(let i=0; i<9; i++) {
+            let slot=document.createElement('div'); slot.className='slot'+(i===player.selectedSlot?' active':'');
+            let item=player.inventory[i];
+            if(item&&item.count>0){
+                let c=document.createElement('canvas'); c.width=16; c.height=16;
+                let ctx=c.getContext('2d');
+                let pixels=generateBlockTexture(item.block,'side');
+                let imgData=ctx.createImageData(16,16); imgData.data.set(pixels); ctx.putImageData(imgData,0,0);
+                slot.appendChild(c);
+                let cnt=document.createElement('span'); cnt.className='count'; cnt.textContent=item.count; slot.appendChild(cnt);
+            }
+            hotbar.appendChild(slot);
+        }
+    }
 
-  let crosshair = document.getElementById('crosshair');
-  if(player.breakProgress > 0) {
-    let p = Math.min(player.breakProgress, 1);
-    crosshair.style.color = `rgb(255,${255*(1-p)|0},${255*(1-p)|0})`;
-    crosshair.textContent = ['✦','✧','✶','✧'][gameTime*8&3];
-  } else {
-    crosshair.style.color = '#fff';
-    crosshair.textContent = '✦';
-  }
+    // ─── GL init ─────────────────────────────────────────────────────────────────
+    let glTexture, skyVBO, gameTime=0;
 
-  let lookHit = raycast(eyeX, eyeY, eyeZ, lookDir[0], lookDir[1], lookDir[2], REACH);
-  let blockName = lookHit ? (BLOCK_NAMES[lookHit.block] || '?') : '-';
-  info.innerHTML = `<b>⚔ Medieval Voxel World</b><br>
+    function initGL() {
+        canvas.width=window.innerWidth; canvas.height=window.innerHeight;
+        gl.viewport(0,0,canvas.width,canvas.height);
+        mainProgram     = createProgram(VS_SRC,      FS_SRC);
+        particleProgram = createProgram(VS_PARTICLE,  FS_PARTICLE);
+        skyProgram      = createProgram(VS_SKY,       FS_SKY);
+        textureAtlas=buildTextureAtlas();
+        glTexture=gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D,glTexture);
+        gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,textureAtlas.width,textureAtlas.height,0,gl.RGBA,gl.UNSIGNED_BYTE,textureAtlas.data);
+        gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
+        skyVBO=gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER,skyVBO);
+        gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,1,1,-1,-1,1,1,-1,1]),gl.STATIC_DRAW);
+        gl.enable(gl.DEPTH_TEST); gl.enable(gl.CULL_FACE); gl.cullFace(gl.BACK); gl.frontFace(gl.CCW);
+    }
+
+    // ─── Render ──────────────────────────────────────────────────────────────────
+    function render() {
+        if(canvas.width!==window.innerWidth||canvas.height!==window.innerHeight){
+            canvas.width=window.innerWidth; canvas.height=window.innerHeight;
+            gl.viewport(0,0,canvas.width,canvas.height);
+        }
+
+        let aspect=canvas.width/canvas.height;
+        let proj=mat4Perspective(70*Math.PI/180, aspect, NEAR_PLANE, 200);
+        let [eyeX,eyeY,eyeZ]=getEyePosition();
+        let lookDir=getLookDir();
+        let view=mat4LookAt([eyeX,eyeY,eyeZ],[eyeX+lookDir[0],eyeY+lookDir[1],eyeZ+lookDir[2]],[0,1,0]);
+        let mvp=mat4Mul(proj,view);
+        let invVP=mat4Invert(mvp);
+
+        let dayTime=Math.sin(gameTime*0.02)*0.5+0.5;
+        let fogR=0.18+dayTime*0.47, fogG=0.25+dayTime*0.5, fogB=0.4+dayTime*0.45;
+
+        gl.clearColor(fogR,fogG,fogB,1);
+        gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
+
+        // ── Sky ──────────────────────────────────────────────────────────────────
+        disableAllAttribs();
+        gl.depthMask(false); gl.disable(gl.CULL_FACE);
+        gl.useProgram(skyProgram);
+        let skyPosLoc=gl.getAttribLocation(skyProgram,'aPos');
+        gl.bindBuffer(gl.ARRAY_BUFFER,skyVBO);
+        gl.vertexAttribPointer(skyPosLoc,2,gl.FLOAT,false,0,0); enableAttrib(skyPosLoc);
+        gl.uniform1f(gl.getUniformLocation(skyProgram,'uTime'),gameTime);
+        gl.uniformMatrix4fv(gl.getUniformLocation(skyProgram,'uInvVP'),false,invVP);
+        gl.drawArrays(gl.TRIANGLES,0,6);
+        disableAllAttribs();
+        gl.depthMask(true); gl.enable(gl.CULL_FACE);
+
+        // ── Opaque geometry ──────────────────────────────────────────────────────
+        gl.useProgram(mainProgram);
+        gl.uniformMatrix4fv(gl.getUniformLocation(mainProgram,'uMVP'),false,mvp);
+        gl.uniform3f(gl.getUniformLocation(mainProgram,'uFogColor'),fogR,fogG,fogB);
+        gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D,glTexture);
+        gl.uniform1i(gl.getUniformLocation(mainProgram,'uTex'),0);
+
+        let triCount=0;
+        for(let key in chunkMeshes) {
+            let mesh=chunkMeshes[key];
+            if(mesh&&mesh.opaque){
+                bindVAO(mesh.opaque.vao, mainProgram);
+                gl.drawArrays(gl.TRIANGLES,0,mesh.opaque.count);
+                triCount+=mesh.opaque.count;
+            }
+        }
+
+        // ── Transparent geometry — sorted ─────────────────────────────────────────
+        // 1. Сортируем чанки по расстоянию (дальние чанки рисуются первыми)
+        let transparentChunks = [];
+        for(let key in chunkMeshes) {
+            let mesh=chunkMeshes[key];
+            if(!mesh || !mesh.tQuads || mesh.tQuads.length===0) continue;
+            let [ccx,ccz]=key.split(',').map(Number);
+            let chunkCX=(ccx+0.5)*CHUNK_SIZE, chunkCZ=(ccz+0.5)*CHUNK_SIZE;
+            let distSq=(chunkCX-eyeX)**2+(chunkCZ-eyeZ)**2;
+            transparentChunks.push({key, distSq});
+        }
+        transparentChunks.sort((a,b)=>b.distSq-a.distSq); // дальние → ближние
+
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+        gl.depthMask(false);
+        gl.disable(gl.CULL_FACE);
+
+        for(let {key} of transparentChunks) {
+            // 2. Внутри каждого чанка квады тоже отсортированы back-to-front
+            let sorted=buildSortedTransparentVAO(key, eyeX, eyeY, eyeZ);
+            if(!sorted) continue;
+            bindVAO(sorted.vao, mainProgram);
+            gl.drawArrays(gl.TRIANGLES, 0, sorted.count);
+            triCount+=sorted.count;
+        }
+
+        // ── Particles ─────────────────────────────────────────────────────────────
+        if(particles.length>0) {
+            disableAllAttribs();
+            gl.useProgram(particleProgram);
+            gl.uniformMatrix4fv(gl.getUniformLocation(particleProgram,'uMVP'),false,mvp);
+            gl.uniform3f(gl.getUniformLocation(particleProgram,'uFogColor'),fogR,fogG,fogB);
+            let pArr=[],cArr=[],sArr=[];
+            for(let p of particles){
+                pArr.push(p.x,p.y,p.z);
+                cArr.push(p.r,p.g,p.b,p.life/p.maxLife);
+                sArr.push(p.size);
+            }
+            let pBuf=gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER,pBuf); gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(pArr),gl.DYNAMIC_DRAW);
+            let pLoc=gl.getAttribLocation(particleProgram,'aPos'); gl.vertexAttribPointer(pLoc,3,gl.FLOAT,false,0,0); enableAttrib(pLoc);
+            let cBuf=gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER,cBuf); gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(cArr),gl.DYNAMIC_DRAW);
+            let cLoc=gl.getAttribLocation(particleProgram,'aColor'); gl.vertexAttribPointer(cLoc,4,gl.FLOAT,false,0,0); enableAttrib(cLoc);
+            let sBuf=gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER,sBuf); gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(sArr),gl.DYNAMIC_DRAW);
+            let sLoc=gl.getAttribLocation(particleProgram,'aSize'); gl.vertexAttribPointer(sLoc,1,gl.FLOAT,false,0,0); enableAttrib(sLoc);
+            gl.drawArrays(gl.POINTS,0,particles.length);
+            gl.deleteBuffer(pBuf); gl.deleteBuffer(cBuf); gl.deleteBuffer(sBuf);
+        }
+
+        gl.disable(gl.BLEND); gl.depthMask(true); gl.enable(gl.CULL_FACE);
+        disableAllAttribs();
+
+        // ── HUD ───────────────────────────────────────────────────────────────────
+        let crosshair=document.getElementById('crosshair');
+        if(player.breakProgress>0){
+            let p=Math.min(player.breakProgress,1);
+            crosshair.style.color=`rgb(255,${255*(1-p)|0},${255*(1-p)|0})`;
+            crosshair.textContent=['✦','✧','✶','✧'][gameTime*8&3];
+        } else { crosshair.style.color='#fff'; crosshair.textContent='✦'; }
+
+        let lookHit=raycast(eyeX,eyeY,eyeZ,lookDir[0],lookDir[1],lookDir[2],REACH);
+        let blockName=lookHit?(BLOCK_NAMES[lookHit.block]||'?'):'-';
+        info.innerHTML=`<b>⚔ Medieval Voxel World</b><br>
 XYZ: ${player.x.toFixed(1)} / ${player.y.toFixed(1)} / ${player.z.toFixed(1)}<br>
 ${player.flying?'✈ Flying':'🚶 Walking'} <small>[F toggle]</small><br>
 Target: ${blockName}<br>
 Tris: ${(triCount/3)|0} | Chunks: ${Object.keys(chunkMeshes).length}<br>
 Seed: ${WORLD_SEED}`;
-}
-
-let chunkMeshQueue = [];
-
-function deleteChunkMesh(key) {
-  let old = chunkMeshes[key];
-  if(!old) return;
-  if(old.opaque) {
-    gl.deleteBuffer(old.opaque.vao.posBuf); gl.deleteBuffer(old.opaque.vao.uvBuf);
-    gl.deleteBuffer(old.opaque.vao.lightBuf); gl.deleteBuffer(old.opaque.vao.aoBuf);
-  }
-  if(old.transparent) {
-    gl.deleteBuffer(old.transparent.vao.posBuf); gl.deleteBuffer(old.transparent.vao.uvBuf);
-    gl.deleteBuffer(old.transparent.vao.lightBuf); gl.deleteBuffer(old.transparent.vao.aoBuf);
-  }
-  delete chunkMeshes[key];
-}
-
-function updateChunks() {
-  let pcx = Math.floor(player.x / CHUNK_SIZE);
-  let pcz = Math.floor(player.z / CHUNK_SIZE);
-  for(let dx = -RENDER_DIST; dx <= RENDER_DIST; dx++) {
-    for(let dz = -RENDER_DIST; dz <= RENDER_DIST; dz++) {
-      if(dx*dx+dz*dz > RENDER_DIST*RENDER_DIST) continue;
-      let cx = pcx+dx, cz = pcz+dz;
-      let key = chunkKey(cx,cz);
-      if(!chunks[key]) {
-        chunks[key] = generateChunk(cx, cz);
-        chunkMeshQueue.push(key);
-      }
     }
-  }
-  let built = 0;
-  for(let key of dirtyChunks) {
-    if(chunks[key]) {
-      let [cx,cz] = key.split(',').map(Number);
-      deleteChunkMesh(key);
-      chunkMeshes[key] = buildChunkMesh(cx, cz);
-      built++;
+
+    // ─── Chunk management ─────────────────────────────────────────────────────────
+    let chunkMeshQueue = [];
+
+    function deleteChunkMesh(key) {
+        let old=chunkMeshes[key]; if(!old) return;
+        if(old.opaque) freeVAO(old.opaque.vao);
+        // Прозрачная геометрия хранится в кэше — чистим и его
+        if(transparentBufferCache[key]){
+            freeVAO(transparentBufferCache[key].vao);
+            delete transparentBufferCache[key];
+        }
+        delete chunkMeshes[key];
     }
-  }
-  dirtyChunks.clear();
-  while(chunkMeshQueue.length > 0 && built < 3) {
-    let key = chunkMeshQueue.shift();
-    if(chunks[key] && !chunkMeshes[key]) {
-      let [cx,cz] = key.split(',').map(Number);
-      chunkMeshes[key] = buildChunkMesh(cx, cz);
-      built++;
+
+    function updateChunks() {
+        let pcx=Math.floor(player.x/CHUNK_SIZE), pcz=Math.floor(player.z/CHUNK_SIZE);
+
+        // Генерируем новые чанки в радиусе рендера
+        for(let dx=-RENDER_DIST; dx<=RENDER_DIST; dx++) for(let dz=-RENDER_DIST; dz<=RENDER_DIST; dz++) {
+            if(dx*dx+dz*dz>RENDER_DIST*RENDER_DIST) continue;
+            let cx=pcx+dx, cz=pcz+dz, key=chunkKey(cx,cz);
+            if(!chunks[key]){
+                chunks[key]=generateChunk(cx,cz);
+                chunkMeshQueue.push(key);
+                // Помечаем соседей грязными (их меши могут обновиться на границе)
+                for(let ak of [chunkKey(cx-1,cz),chunkKey(cx+1,cz),chunkKey(cx,cz-1),chunkKey(cx,cz+1)])
+                    if(chunks[ak]&&chunkMeshes[ak]) dirtyChunks.add(ak);
+            }
+        }
+
+        // Пересобираем грязные меши
+        let built=0;
+        for(let key of dirtyChunks) {
+            if(chunks[key]){
+                let [cx,cz]=key.split(',').map(Number);
+                deleteChunkMesh(key);
+                chunkMeshes[key]=buildChunkMesh(cx,cz);
+                built++;
+            }
+        }
+        dirtyChunks.clear();
+
+        // Строим меши из очереди (не более 3 за кадр)
+        while(chunkMeshQueue.length>0 && built<3) {
+            let key=chunkMeshQueue.shift();
+            if(chunks[key]&&!chunkMeshes[key]){
+                let [cx,cz]=key.split(',').map(Number);
+                chunkMeshes[key]=buildChunkMesh(cx,cz);
+                built++;
+            }
+        }
+
+        // Выгружаем далёкие чанки
+        for(let key in chunks) {
+            let [cx,cz]=key.split(',').map(Number);
+            let dx=cx-pcx, dz=cz-pcz;
+            if(dx*dx+dz*dz>(RENDER_DIST+2)*(RENDER_DIST+2)){
+                deleteChunkMesh(key);
+                delete chunks[key];
+            }
+        }
     }
-  }
-  for(let key in chunks) {
-    let [cx,cz] = key.split(',').map(Number);
-    let dx = cx-pcx, dz = cz-pcz;
-    if(dx*dx+dz*dz > (RENDER_DIST+2)*(RENDER_DIST+2)) {
-      deleteChunkMesh(key);
-      delete chunks[key];
+
+    // ─── Game loop ────────────────────────────────────────────────────────────────
+    let lastTime=0;
+    function gameLoop(time) {
+        requestAnimationFrame(gameLoop);
+        let dt=Math.min((time-lastTime)/1000, 0.05);
+        lastTime=time; gameTime+=dt;
+        updatePlayer(dt); updateParticles(dt); updateChunks(); render();
     }
-  }
-}
 
-let lastTime = 0;
+    // ─── Init ─────────────────────────────────────────────────────────────────────
+    async function init() {
+        let fill=document.getElementById('loadFill'), tip=document.getElementById('loadTip');
+        const tips=[
+            'Carving mountains from noise...','Planting ancient forests...',
+            'Hiding ores in the depths...','Brewing medieval atmosphere...',
+            'Painting textures by hand...','Forging the world anvil...',
+            'Summoning procedural sounds...','Lighting medieval torches...'
+        ];
+        fill.style.width='10%'; tip.textContent=tips[0]; await new Promise(r=>setTimeout(r,80));
+        initGL();
+        fill.style.width='30%'; tip.textContent=tips[1]; await new Promise(r=>setTimeout(r,50));
+        spawnPlayer();
+        fill.style.width='50%'; tip.textContent=tips[3]; await new Promise(r=>setTimeout(r,50));
 
-function gameLoop(time) {
-  requestAnimationFrame(gameLoop);
-  let dt = Math.min((time - lastTime) / 1000, 0.05);
-  lastTime = time;
-  gameTime += dt;
-  updatePlayer(dt);
-  updateParticles(dt);
-  updateChunks();
-  render();
-}
+        let pcx=Math.floor(player.x/CHUNK_SIZE), pcz=Math.floor(player.z/CHUNK_SIZE);
+        let list=[];
+        for(let dx=-3;dx<=3;dx++) for(let dz=-3;dz<=3;dz++) if(dx*dx+dz*dz<=9) list.push([pcx+dx,pcz+dz]);
 
-async function init() {
-  let fill = document.getElementById('loadFill');
-  let tip = document.getElementById('loadTip');
-  const tips = [
-    'Carving mountains from noise...',
-    'Planting ancient forests...',
-    'Hiding ores in the depths...',
-    'Brewing medieval atmosphere...',
-    'Painting textures by hand...',
-    'Forging the world anvil...',
-    'Summoning procedural sounds...',
-    'Lighting medieval torches...'
-  ];
-  fill.style.width = '10%'; tip.textContent = tips[0];
-  await new Promise(r => setTimeout(r, 80));
-  initGL();
-  fill.style.width = '30%'; tip.textContent = tips[1];
-  await new Promise(r => setTimeout(r, 50));
-  spawnPlayer();
-  fill.style.width = '50%'; tip.textContent = tips[3];
-  await new Promise(r => setTimeout(r, 50));
-  let pcx = Math.floor(player.x / CHUNK_SIZE);
-  let pcz = Math.floor(player.z / CHUNK_SIZE);
-  let list = [];
-  for(let dx=-3;dx<=3;dx++) for(let dz=-3;dz<=3;dz++) {
-    if(dx*dx+dz*dz<=9) list.push([pcx+dx, pcz+dz]);
-  }
-  for(let i=0;i<list.length;i++) {
-    let [cx,cz] = list[i];
-    let key = chunkKey(cx,cz);
-    chunks[key] = generateChunk(cx, cz);
-    chunkMeshes[key] = buildChunkMesh(cx, cz);
-    fill.style.width = (50 + (i/list.length)*45) + '%';
-    tip.textContent = tips[Math.min((i/(list.length/tips.length))|0, tips.length-1)];
-    await new Promise(r => setTimeout(r, 5));
-  }
-  fill.style.width = '100%';
-  tip.textContent = 'World ready! Click to play.';
-  await new Promise(r => setTimeout(r, 300));
-  let spawnH = getTerrainHeight(Math.floor(player.x), Math.floor(player.z));
-  if(player.y < spawnH + 2) player.y = spawnH + 2;
-  updateHotbar();
-  document.getElementById('loading').style.display = 'none';
-  requestAnimationFrame(gameLoop);
-}
+        for(let i=0; i<list.length; i++) {
+            let [cx,cz]=list[i]; let key=chunkKey(cx,cz);
+            chunks[key]=generateChunk(cx,cz);
+            fill.style.width=(50+(i/list.length)*40)+'%';
+            tip.textContent=tips[Math.min((i/(list.length/tips.length))|0, tips.length-1)];
+            await new Promise(r=>setTimeout(r,2));
+        }
+        for(let i=0; i<list.length; i++) {
+            let [cx,cz]=list[i]; let key=chunkKey(cx,cz);
+            chunkMeshes[key]=buildChunkMesh(cx,cz);
+            fill.style.width=(90+(i/list.length)*10)+'%';
+            await new Promise(r=>setTimeout(r,2));
+        }
 
-init();
+        fill.style.width='100%'; tip.textContent='World ready! Click to play.';
+        await new Promise(r=>setTimeout(r,300));
+        let spawnH=getTerrainHeight(Math.floor(player.x),Math.floor(player.z));
+        if(player.y<spawnH+2) player.y=spawnH+2;
+        updateHotbar();
+        document.getElementById('loading').style.display='none';
+        requestAnimationFrame(gameLoop);
+    }
+
+    init();
 </script>
 </body>
 </html>
