@@ -2,8 +2,9 @@ import {
     BLOCK, CHUNK_SIZE, CHUNK_HEIGHT, RENDER_DIST,
     TRANSPARENT, NON_SOLID, CROSS_BLOCKS, ALPHA_BLOCKS,
     chunks, chunkKey, generateChunk, getBlock, isOpaque, dirtyChunks,
-    registry, texUtil,
+    registry,
 } from './world.js';
+import { loadAndBuildAtlas } from './textures.js';
 
 // ── Вспомогательные функции WebGL ────────────────────────────────────────────
 
@@ -257,63 +258,12 @@ export function bindVAO(vao, prog) {
 
 // ── Текстурный атлас ──────────────────────────────────────────────────────────
 
-export let textureAtlas;
+export let textureAtlas = null;
 
-export function buildTextureAtlas() {
-    const TEX = 16;
-
-    const blockDefs = [];
-    for (const [id, def] of registry.all()) {
-        if (def.textureFn !== null) blockDefs.push({ id, def });
-    }
-
-    const cols = 3, rows = blockDefs.length;
-    const atlasW = cols * TEX, atlasH = rows * TEX;
-    let pw = 1; while (pw < atlasW) pw *= 2;
-    let ph = 1; while (ph < atlasH) ph *= 2;
-
-    const atlas = new Uint8Array(pw * ph * 4);
-    const uvMap = {};
-    const faces = ['top', 'side', 'bottom'];
-
-    blockDefs.forEach(({ id, def }, rowIdx) => {
-        uvMap[id] = {};
-        faces.forEach((face, col) => {
-            const px = texUtil.blank();
-            const fn = def.textureFn;
-
-            let drawFn;
-            if (typeof fn === 'function') {
-                drawFn = fn;
-            } else if (fn && typeof fn === 'object') {
-                drawFn = fn[face] ?? fn.side ?? Object.values(fn)[0];
-            }
-
-            if (drawFn) drawFn(face, px);
-
-            const ox = col * TEX, oy = rowIdx * TEX;
-            for (let y = 0; y < TEX; y++) {
-                for (let x = 0; x < TEX; x++) {
-                    const si = (y * TEX + x) * 4;
-                    const atlasY = oy + (TEX - 1 - y);
-                    const di = (atlasY * pw + (ox + x)) * 4;
-                    atlas[di]   = px[si];
-                    atlas[di+1] = px[si+1];
-                    atlas[di+2] = px[si+2];
-                    atlas[di+3] = px[si+3];
-                }
-            }
-
-            uvMap[id][face] = {
-                u:  ox / pw,
-                v:  oy / ph,
-                uw: TEX / pw,
-                vh: TEX / ph,
-            };
-        });
-    });
-
-    return { data: atlas, width: pw, height: ph, uvMap };
+// Асинхронная загрузка атласа
+export async function loadTextureAtlas(onProgress = null) {
+    textureAtlas = await loadAndBuildAtlas(registry, 'assets/textures/blocks/', onProgress);
+    return textureAtlas;
 }
 
 // ── Меши чанков ───────────────────────────────────────────────────────────────
@@ -497,7 +447,7 @@ function buildSortedTransparentVAO(key, eyeX, eyeY, eyeZ) {
 
 let mainProgram, particleProgram, skyProgram, glTexture, skyVBO;
 
-export function initGL(canvas) {
+export async function initGL(canvas, onTextureProgress = null) {
     gl = canvas.getContext('webgl', { antialias: false, alpha: false });
     if (!gl) { alert('WebGL не поддерживается.'); return null; }
 
@@ -509,7 +459,8 @@ export function initGL(canvas) {
     particleProgram = createProgram(VS_PARTICLE,  FS_PARTICLE);
     skyProgram      = createProgram(VS_SKY,       FS_SKY);
 
-    textureAtlas = buildTextureAtlas();
+    // Асинхронная загрузка текстур
+    await loadTextureAtlas(onTextureProgress);
 
     glTexture = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, glTexture);
@@ -637,4 +588,194 @@ export function renderFrame({ mvp, invVP, eyePos, gameTime, particles }) {
     disableAllAttribs();
 
     return triCount;
+}
+
+// ── Рендер сущностей (выпавшие предметы) ──────────────────────────────────────
+
+const VS_ITEM = `
+attribute vec3 aPos;
+attribute vec2 aUV;
+uniform mat4 uMVP;
+varying vec2 vUV;
+void main() {
+    gl_Position = uMVP * vec4(aPos, 1.0);
+    vUV = aUV;
+}`;
+
+const FS_ITEM = `
+precision mediump float;
+varying vec2 vUV;
+uniform sampler2D uTex;
+uniform float uAlpha;
+void main() {
+    vec4 tex = texture2D(uTex, vUV);
+    if (tex.a < 0.1) discard;
+    gl_FragColor = vec4(tex.rgb, tex.a * uAlpha);
+}`;
+
+let itemProgram = null;
+let itemPosLoc, itemUvLoc, itemAlphaLoc, itemMvpLoc;
+
+function initItemRenderer() {
+    if (itemProgram) return;
+    itemProgram = createProgram(VS_ITEM, FS_ITEM);
+    itemPosLoc = gl.getAttribLocation(itemProgram, 'aPos');
+    itemUvLoc = gl.getAttribLocation(itemProgram, 'aUV');
+    itemAlphaLoc = gl.getUniformLocation(itemProgram, 'uAlpha');
+    itemMvpLoc = gl.getUniformLocation(itemProgram, 'uMVP');
+}
+
+// Создание куба с ПРАВИЛЬНЫМИ UV (копируем логику из buildChunkMesh)
+function createItemCubeGeometry(blockType) {
+    const uvInfo = textureAtlas.uvMap[blockType];
+    if (!uvInfo) return null;
+
+    const s = 0.12;
+    const positions = [];
+    const uvs = [];
+
+    // UV координаты как в buildChunkMesh
+    const addFace = (verts, uv) => {
+        const uvC = [
+            [uv.u, uv.v + uv.vh],           // 0: левый верх
+            [uv.u + uv.uw, uv.v + uv.vh],   // 1: правый верх
+            [uv.u + uv.uw, uv.v],           // 2: правый низ
+            [uv.u, uv.v],                   // 3: левый низ
+        ];
+        for (const idx of [0, 1, 2, 0, 2, 3]) {
+            positions.push(...verts[idx]);
+            uvs.push(...uvC[idx]);
+        }
+    };
+
+    // Грани в том же порядке что и в buildChunkMesh
+    // Top (+Y)
+    addFace([[-s, s, s], [s, s, s], [s, s, -s], [-s, s, -s]], uvInfo.top);
+    // Bottom (-Y)
+    addFace([[-s, -s, -s], [s, -s, -s], [s, -s, s], [-s, -s, s]], uvInfo.bottom);
+    // +X
+    addFace([[s, s, -s], [s, s, s], [s, -s, s], [s, -s, -s]], uvInfo.side);
+    // -X
+    addFace([[-s, s, s], [-s, s, -s], [-s, -s, -s], [-s, -s, s]], uvInfo.side);
+    // +Z
+    addFace([[s, s, s], [-s, s, s], [-s, -s, s], [s, -s, s]], uvInfo.side);
+    // -Z
+    addFace([[-s, s, -s], [s, s, -s], [s, -s, -s], [-s, -s, -s]], uvInfo.side);
+
+    return { positions: new Float32Array(positions), uvs: new Float32Array(uvs), count: 36 };
+}
+
+// Billboard - плоский спрайт всегда лицом к камере
+function createItemBillboardGeometry(blockType) {
+    const uvInfo = textureAtlas.uvMap[blockType];
+    if (!uvInfo) return null;
+
+    const uv = uvInfo.side;
+    const s = 0.2;
+
+    // Плоскость в XY, будет повёрнута к камере
+    const positions = new Float32Array([
+        -s, 0, 0,    s, 0, 0,    s, s*2, 0,
+        -s, 0, 0,    s, s*2, 0,  -s, s*2, 0,
+    ]);
+
+    const uvs = new Float32Array([
+        uv.u, uv.v,                         uv.u + uv.uw, uv.v,                         uv.u + uv.uw, uv.v + uv.vh,
+        uv.u, uv.v,                         uv.u + uv.uw, uv.v + uv.vh,                 uv.u, uv.v + uv.vh,
+    ]);
+
+    return { positions, uvs, count: 6, isBillboard: true };
+}
+
+const itemGeometryCache = new Map();
+
+function getItemGeometry(blockType, isCross) {
+    const key = blockType * 2 + (isCross ? 1 : 0);
+    let cached = itemGeometryCache.get(key);
+    if (cached) return cached;
+
+    const geom = isCross ? createItemBillboardGeometry(blockType) : createItemCubeGeometry(blockType);
+    if (!geom) return null;
+
+    const posBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, geom.positions, gl.STATIC_DRAW);
+
+    const uvBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, uvBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, geom.uvs, gl.STATIC_DRAW);
+
+    cached = { posBuf, uvBuf, count: geom.count, isBillboard: !!geom.isBillboard };
+    itemGeometryCache.set(key, cached);
+    return cached;
+}
+
+function createTransformMatrix(tx, ty, tz, rotY, scale) {
+    const c = Math.cos(rotY), s = Math.sin(rotY);
+    return new Float32Array([
+        c * scale, 0, -s * scale, 0,
+        0, scale, 0, 0,
+        s * scale, 0, c * scale, 0,
+        tx, ty, tz, 1
+    ]);
+}
+
+export function renderItemEntities(entities, mvp, eyePos, crossBlocks) {
+    if (!entities.length) return;
+
+    initItemRenderer();
+    gl.useProgram(itemProgram);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, glTexture);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    gl.disable(gl.CULL_FACE);
+
+    for (let i = 0; i < entities.length; i++) {
+        const entity = entities[i];
+        if (entity.type !== 'item') continue;
+
+        const blockType = entity.itemStack.type;
+        const isCross = crossBlocks.has(blockType);
+        const geom = getItemGeometry(blockType, isCross);
+        if (!geom) continue;
+
+        const ey = entity.getRenderY();
+        let rotY;
+
+        if (geom.isBillboard) {
+            // Billboard смотрит на камеру
+            rotY = Math.atan2(eyePos[0] - entity.x, eyePos[2] - entity.z);
+        } else {
+            rotY = entity.getRotation();
+        }
+
+        const scale = 1.0 + Math.min(entity.itemStack.count - 1, 3) * 0.08;
+        const itemMVP = mat4Mul(mvp, createTransformMatrix(entity.x, ey, entity.z, rotY, scale));
+
+        gl.uniformMatrix4fv(itemMvpLoc, false, itemMVP);
+        gl.uniform1f(itemAlphaLoc, entity.flashing && Math.sin(entity.age * 10) < 0 ? 0.3 : 1.0);
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, geom.posBuf);
+        gl.vertexAttribPointer(itemPosLoc, 3, gl.FLOAT, false, 0, 0);
+        enableAttrib(itemPosLoc);
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, geom.uvBuf);
+        gl.vertexAttribPointer(itemUvLoc, 2, gl.FLOAT, false, 0, 0);
+        enableAttrib(itemUvLoc);
+
+        gl.drawArrays(gl.TRIANGLES, 0, geom.count);
+    }
+
+    gl.enable(gl.CULL_FACE);
+    gl.disable(gl.BLEND);
+    disableAllAttribs();
+}
+
+export function clearItemGeometryCache() {
+    for (const geom of itemGeometryCache.values()) {
+        gl.deleteBuffer(geom.posBuf);
+        gl.deleteBuffer(geom.uvBuf);
+    }
+    itemGeometryCache.clear();
 }

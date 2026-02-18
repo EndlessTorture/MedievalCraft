@@ -160,6 +160,17 @@ export function playSound(type, volume = 0.3) {
                 break;
             }
 
+            case 'pickup': {
+                const o = audioCtx.createOscillator();
+                o.type = 'sine';
+                o.frequency.setValueAtTime(600, audioCtx.currentTime);
+                o.frequency.exponentialRampToValueAtTime(1200, audioCtx.currentTime + 0.05);
+                gain.gain.setValueAtTime(volume * 0.5, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.1);
+                o.connect(gain); o.start(); o.stop(audioCtx.currentTime + 0.1);
+                break;
+            }
+
             default: break;
         }
     } catch (e) { /* Игнорируем ошибки аудио */ }

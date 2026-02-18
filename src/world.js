@@ -2,8 +2,8 @@
 
 class BlockRegistry {
     constructor() {
-        this._blocks = new Map();   // id → BlockDef
-        this._byName = new Map();   // name → id
+        this._blocks = new Map();
+        this._byName = new Map();
         this._nextId = 0;
     }
 
@@ -25,9 +25,8 @@ class BlockRegistry {
                 variance: def.particle?.variance ?? .08,
                 sound:    def.particle?.sound    ?? 'break_stone',
             },
-            // Текстуры — функция (face) → { r,g,b,a }[]  (16×16 пикселей)
-            // либо объект { top, side, bottom } с функциями
-            textureFn:    def.textureFn    ?? null,
+            // Текстуры - имя файла или { top, side, bottom }
+            texture: def.texture ?? null,
         };
         this._blocks.set(id, entry);
         this._byName.set(name, id);
@@ -42,12 +41,7 @@ class BlockRegistry {
 
 export const registry = new BlockRegistry();
 
-// ── Вспомогательные утилиты для текстур ──────────────────────────────────────
-
-export function makeTex(fn) {
-    // fn(x, y) → [r, g, b] или [r, g, b, a]  (0–255)
-    return fn;
-}
+// ── Вспомогательные утилиты (для экспорта текстур) ────────────────────────────
 
 function hashRand(x, y, s = 0) {
     let h = (x*374761393 + y*668265263 + s*1274126177) ^ (x*y*s + 12345);
@@ -57,7 +51,6 @@ function hashRand(x, y, s = 0) {
     return (h & 0xFFFF) / 0xFFFF;
 }
 
-// Простой детерминированный 2-D шум (без внешних зависимостей)
 function smoothNoise(x, y) {
     const xi = Math.floor(x), yi = Math.floor(y);
     const xf = x - xi, yf = y - yi;
@@ -74,7 +67,6 @@ export const texUtil = {
     hashRand,
     smoothNoise,
 
-    // Накладывает шум на все пиксели массива pixels (Uint8ClampedArray / number[])
     addNoise(pixels, amount, seed = 0) {
         const S = 16;
         for (let y = 0; y < S; y++)
@@ -88,7 +80,6 @@ export const texUtil = {
         return pixels;
     },
 
-    // Заливка
     fill(pixels, r, g, b, a = 255) {
         for (let i = 0; i < 16*16*4; i += 4) {
             pixels[i]=r; pixels[i+1]=g; pixels[i+2]=b; pixels[i+3]=a;
@@ -96,14 +87,12 @@ export const texUtil = {
         return pixels;
     },
 
-    // Нарисовать пиксель
     put(pixels, x, y, r, g, b, a = 255) {
         if (x < 0 || x >= 16 || y < 0 || y >= 16) return;
         const i = (y * 16 + x) * 4;
         pixels[i]=r; pixels[i+1]=g; pixels[i+2]=b; pixels[i+3]=a;
     },
 
-    // Прочитать пиксель
     get(pixels, x, y) {
         if (x < 0 || x >= 16 || y < 0 || y >= 16) return [0,0,0,255];
         const i = (y * 16 + x) * 4;
@@ -113,412 +102,159 @@ export const texUtil = {
     blank() { return new Uint8Array(16 * 16 * 4); },
 };
 
-// ── Текстурные функции блоков ─────────────────────────────────────────────────
-
-const T = texUtil;
-
-const grassTop = (_face, px) => {
-    const S = 16;
-    for (let y=0;y<S;y++) for (let x=0;x<S;x++) {
-        const n = T.hashRand(x,y,1);
-        let g=80+n*50, r=40+n*20, b=20+n*15;
-        if (T.hashRand(x,y,7)<.15) { g+=30; r-=10; }
-        T.put(px,x,y,r,g,b);
-    }
-    T.addNoise(px,15,1);
-};
-
-const dirtTex = (_face, px) => {
-    const S=16;
-    for (let y=0;y<S;y++) for (let x=0;x<S;x++) {
-        const n=T.hashRand(x,y,4);
-        T.put(px,x,y,110+n*30,80+n*20,50+n*15);
-        if (T.hashRand(x,y,99)<.08) T.put(px,x,y,90,65,35);
-    }
-    T.addNoise(px,12,1);
-};
-
-const grassSide = (_face, px) => {
-    const S=16;
-    for (let y=0;y<S;y++) for (let x=0;x<S;x++) {
-        const n=T.hashRand(x,y,3);
-        if (y<3) T.put(px,x,y,40+n*15,70+n*50,20+n*10);
-        else     T.put(px,x,y,110+n*30,80+n*20,50+n*15);
-    }
-    T.addNoise(px,15,2);
-};
-
-function stoneTex(_face, px) {
-    const S=16;
-    for (let y=0;y<S;y++) for (let x=0;x<S;x++) {
-        const n=T.hashRand(x,y,5), n2=T.smoothNoise(x*.4,y*.4)*.5+.5;
-        const v=100+n*30+n2*25; T.put(px,x,y,v,v-2,v-5);
-    }
-    for (let i=0;i<3;i++) {
-        let sx=T.hashRand(i,0,55)*14+1|0, sy=T.hashRand(i,1,55)*14+1|0;
-        for (let j=0;j<4;j++) {
-            T.put(px,sx,sy,70,68,65);
-            sx+=(T.hashRand(i,j,66)*3-1)|0;
-            sy+=(T.hashRand(i,j,77)*3-1)|0;
-        }
-    }
-    T.addNoise(px,10,2);
-}
-
-function woodTop(_face, px) {
-    const S=16;
-    for (let y=0;y<S;y++) for (let x=0;x<S;x++) {
-        const d=Math.sqrt((x-8)**2+(y-8)**2), ring=Math.sin(d*1.5)*.5+.5, v=130+ring*40;
-        T.put(px,x,y,v,v*.7,v*.4);
-    }
-    T.addNoise(px,8,3);
-}
-
-function woodSide(_face, px) {
-    const S=16;
-    for (let y=0;y<S;y++) for (let x=0;x<S;x++) {
-        const bark=Math.sin(x*.8+T.smoothNoise(x*.3,y*.2)*3)*.5+.5, n=T.hashRand(x,y,8), v=100+bark*35+n*15;
-        T.put(px,x,y,v,v*.65,v*.35);
-    }
-    for (let x=0;x<S;x+=(3+(T.hashRand(x,0,11)*2|0)))
-        for (let y=0;y<S;y++) if (T.hashRand(x,y,12)<.4) {
-            const c=T.get(px,x,y); T.put(px,x,y,c[0]*.8,c[1]*.8,c[2]*.8);
-        }
-    T.addNoise(px,8,3);
-}
-
-function leavesTex(_face, px) {
-    const S=16;
-    for (let y=0;y<S;y++) for (let x=0;x<S;x++) {
-        const n=T.hashRand(x,y,9), n2=T.smoothNoise(x*.5,y*.5)*.5+.5;
-        T.put(px,x,y,25+n*20,60+n*40+n2*30,20+n*10);
-    }
-    T.addNoise(px,15,4);
-}
-
-function sandTex(_face, px) {
-    const S=16;
-    for (let y=0;y<S;y++) for (let x=0;x<S;x++) {
-        const n=T.hashRand(x,y,10), v=200+n*40;
-        T.put(px,x,y,v,v*.9,v*.6);
-        if (T.hashRand(x,y,44)<.05) T.put(px,x,y,180,170,110);
-    }
-    T.addNoise(px,10,5);
-}
-
-function waterTex(_face, px) {
-    const S=16;
-    for (let y=0;y<S;y++) for (let x=0;x<S;x++) {
-        const n=T.smoothNoise(x*.3,y*.3)*.5+.5;
-        T.put(px,x,y,20+n*20,50+n*30,140+n*40,180);
-    }
-}
-
-function cobbleTex(_face, px) {
-    const S=16;
-    for (let y=0;y<S;y++) for (let x=0;x<S;x++) {
-        const n=T.hashRand(x,y,13), v=90+n*40; T.put(px,x,y,v,v-3,v-5);
-    }
-    for (let i=0;i<6;i++) {
-        const bx=T.hashRand(i,0,14)*14+1|0, by=T.hashRand(i,1,14)*14+1|0, s=T.hashRand(i,2,14)*3+2|0;
-        for (let dy=-s;dy<=s;dy++) for (let dx=-s;dx<=s;dx++) if (dx*dx+dy*dy<s*s) {
-            const c=T.get(px,bx+dx,by+dy), sh=T.hashRand(i,3,14)*20-10;
-            T.put(px,bx+dx,by+dy,c[0]+sh,c[1]+sh,c[2]+sh);
-        }
-        for (let a=0;a<Math.PI*2;a+=.3) {
-            const cx=bx+Math.cos(a)*s|0, cy=by+Math.sin(a)*s|0;
-            const c=T.get(px,cx,cy); T.put(px,cx,cy,c[0]*.7,c[1]*.7,c[2]*.7);
-        }
-    }
-    T.addNoise(px,8,6);
-}
-
-function planksTex(_face, px) {
-    const S=16;
-    for (let y=0;y<S;y++) for (let x=0;x<S;x++) {
-        const n=T.hashRand(x,y,15), v=160+n*25+(y/4|0)%2*10, line=y%4===0?.7:1;
-        T.put(px,x,y,v*line,v*.72*line,v*.42*line);
-    }
-    for (let p=0;p<4;p++) T.put(px,T.hashRand(p,0,16)*12+2|0,p*4+2,60,55,50);
-    T.addNoise(px,8,7);
-}
-
-function makeOreTex(oreR, oreG, oreB, seed) {
-    return function(_face, px) {
-        stoneTex(_face, px);
-        for (let i=0;i<5;i++) {
-            const cx=T.hashRand(i,0,seed)*12+2|0, cy=T.hashRand(i,1,seed)*12+2|0;
-            for (let dy=-1;dy<=1;dy++) for (let dx=-1;dx<=1;dx++)
-                if (T.hashRand(i+dx,dy,seed)<.65)
-                    T.put(px,cx+dx,cy+dy,oreR,oreG,oreB);
-        }
-        T.addNoise(px,8,seed);
-    };
-}
-
-function brickTex(_face, px) {
-    const S=16;
-    T.fill(px,140,75,55);
-    for (let y=0;y<S;y++) for (let x=0;x<S;x++) {
-        const n=T.hashRand(x,y,23), row=y/4|0, off=(row%2)*4;
-        if (y%4===0||(x+off)%8===0) T.put(px,x,y,170+n*20,165+n*15,150+n*10);
-        else { const v=140+n*30; T.put(px,x,y,v,v*.5,v*.35); }
-    }
-    T.addNoise(px,10,11);
-}
-
-function snowTex(_face, px) {
-    const S=16;
-    for (let y=0;y<S;y++) for (let x=0;x<S;x++) {
-        const n=T.hashRand(x,y,24), v=230+n*25;
-        T.put(px,x,y,v,v,Math.min(255,v+5));
-    }
-    T.addNoise(px,5,12);
-}
-
-function gravelTex(_face, px) {
-    const S=16;
-    for (let y=0;y<S;y++) for (let x=0;x<S;x++) {
-        const n=T.hashRand(x,y,25), v=100+n*50; T.put(px,x,y,v,v-3,v-8);
-    }
-    T.addNoise(px,15,13);
-}
-
-function glassTex(_face, px) {
-    T.fill(px,200,220,235,50);
-    for (let i=0;i<16;i++) {
-        T.put(px,i,0,180,200,210,220); T.put(px,i,15,180,200,210,220);
-        T.put(px,0,i,180,200,210,220); T.put(px,15,i,180,200,210,220);
-    }
-    for (let i=0;i<5;i++) { T.put(px,2+i,2,255,255,255,100); T.put(px,2,2+i,255,255,255,80); }
-}
-
-function bedRockTex(_face, px) {
-    const S=16;
-    for (let y=0;y<S;y++) for (let x=0;x<S;x++) {
-        const n=T.hashRand(x,y,27), v=30+n*30; T.put(px,x,y,v,v,v);
-    }
-    T.addNoise(px,10,14);
-}
-
-function bookshelfSide(_face, px) {
-    T.fill(px,140,110,70);
-    let bx=1;
-    while (bx<15) {
-        const bw=1+(T.hashRand(bx,0,28)*2|0);
-        const palettes=[
-            [120+T.hashRand(bx,1,28)*60,30+T.hashRand(bx,2,28)*40,30],
-            [30,60+T.hashRand(bx,3,28)*60,30+T.hashRand(bx,4,28)*40],
-            [30+T.hashRand(bx,5,28)*40,30,100+T.hashRand(bx,6,28)*60],
-            [130+T.hashRand(bx,7,28)*40,100+T.hashRand(bx,8,28)*30,30],
-        ];
-        const col=palettes[T.hashRand(bx,9,28)*4|0];
-        for (let shelf=0;shelf<2;shelf++) {
-            const sy=shelf*8+1;
-            for (let dy=0;dy<6;dy++) for (let dx=0;dx<bw;dx++) T.put(px,bx+dx,sy+dy,...col);
-        }
-        bx+=bw+1;
-    }
-    for (let x=0;x<16;x++) {
-        T.put(px,x,0,100,75,40); T.put(px,x,8,100,75,40);
-        T.put(px,x,7,90,65,35);  T.put(px,x,15,100,75,40);
-    }
-    T.addNoise(px,8,15);
-}
-
-function tallGrassTex(_face, px) {
-    for (let s=0;s<3;s++) {
-        let bx=4+s*4+(Math.random()*3-1|0);
-        for (let y=15;y>=4;y--) {
-            const sway=Math.sin((15-y)*.3+s)*1.5, cx=bx+sway|0, n=T.hashRand(cx,y,s*7);
-            T.put(px,cx,y,40+n*20,90+n*50,20+n*15);
-            if (cx+1<16) T.put(px,cx+1,y,35+n*15,80+n*40,18+n*10,200);
-        }
-    }
-}
-
-function flowerTex(petalR, petalG, petalB, centreR, centreG, centreB) {
-    return function(_face, px) {
-        // Стебель
-        for (let y=8;y<16;y++) { T.put(px,7,y,30,80,20); T.put(px,8,y,30,80,20); }
-        // Лепестки
-        [[7,5],[9,5],[6,6],[10,6],[7,7],[9,7],[8,4],[8,6]].forEach(([x,y])=>{
-            T.put(px,x,y,petalR,petalG,petalB);
-        });
-        // Центр
-        T.put(px,8,5,centreR,centreG,centreB);
-    };
-}
-
-function mushroomTex(_face, px) {
-    for (let y=10;y<16;y++) { T.put(px,7,y,200,190,170); T.put(px,8,y,200,190,170); }
-    for (let dy=-3;dy<=0;dy++) for (let dx=-3;dx<=3;dx++) if (dx*dx+dy*dy<=10) {
-        T.put(px,8+dx,8+dy,180,30,30);
-        if (T.hashRand(dx+3,dy+3,55)<.3) T.put(px,8+dx,8+dy,240,240,230);
-    }
-}
-
-function torchTex(_face, px) {
-    for (let y=5;y<16;y++) { T.put(px,7,y,140,110,60); T.put(px,8,y,140,110,60); }
-    T.put(px,7,3,255,200,50); T.put(px,8,3,255,200,50);
-    T.put(px,7,4,255,150,30); T.put(px,8,4,255,150,30);
-    T.put(px,8,2,255,230,100,200);
-}
-
-// ── Регистрация всех блоков ───────────────────────────────────────────────────
+// ── Регистрация блоков ────────────────────────────────────────────────────────
 
 export const BLOCK = (() => {
     const ids = {};
 
-    // id=0 — воздух (специальный, не регистрируется через register)
     ids.AIR = registry.register('AIR', {
         transparent: true, solid: false, hardness: 0,
-        textureFn: null,
+        texture: null,
         particle: { colors: [[1,1,1]], variance: 0, sound: 'break_stone' },
     });
 
     ids.GRASS = registry.register('GRASS', {
         hardness: 1,
-        textureFn: { top: grassTop, side: grassSide, bottom: dirtTex },
+        texture: { top: 'grass_top', side: 'grass_side', bottom: 'dirt' },
         particle: { colors: [[.25,.55,.15],[.55,.42,.22]], variance:.07, sound:'break_grass' },
     });
 
     ids.DIRT = registry.register('DIRT', {
         hardness: 0.8,
-        textureFn: dirtTex,
+        texture: 'dirt',
         particle: { colors: [[.50,.35,.18],[.42,.28,.12]], variance:.06, sound:'break_dirt' },
     });
 
     ids.STONE = registry.register('STONE', {
         hardness: 3,
-        textureFn: stoneTex,
+        texture: 'stone',
         particle: { colors: [[.50,.50,.50],[.40,.40,.42]], variance:.08, sound:'break_stone' },
     });
 
     ids.WOOD = registry.register('WOOD', {
         hardness: 2,
-        textureFn: { top: woodTop, side: woodSide, bottom: woodTop },
+        texture: { top: 'wood_top', side: 'wood_side', bottom: 'wood_top' },
         particle: { colors: [[.52,.34,.14],[.45,.28,.10]], variance:.06, sound:'break_wood' },
     });
 
     ids.LEAVES = registry.register('LEAVES', {
         transparent: true, hardness: 0.3,
-        textureFn: leavesTex,
+        texture: 'leaves',
         particle: { colors: [[.15,.50,.10],[.20,.60,.12]], variance:.07, sound:'break_leaves' },
     });
 
     ids.SAND = registry.register('SAND', {
         hardness: 0.8,
-        textureFn: sandTex,
+        texture: 'sand',
         particle: { colors: [[.85,.78,.50],[.78,.70,.42]], variance:.06, sound:'break_sand' },
     });
 
     ids.WATER = registry.register('WATER', {
         transparent: true, solid: false, alpha: true, hardness: 0,
-        textureFn: waterTex,
+        texture: 'water',
         particle: { colors: [[.08,.25,.70],[.10,.35,.80]], variance:.05, sound:'break_water' },
     });
 
     ids.COBBLE = registry.register('COBBLE', {
         hardness: 3,
-        textureFn: cobbleTex,
+        texture: 'cobble',
         particle: { colors: [[.45,.45,.45],[.38,.38,.38]], variance:.07, sound:'break_stone' },
     });
 
     ids.PLANKS = registry.register('PLANKS', {
         hardness: 2,
-        textureFn: planksTex,
+        texture: 'planks',
         particle: { colors: [[.60,.42,.22],[.50,.34,.14]], variance:.05, sound:'break_wood' },
     });
 
     ids.COAL_ORE = registry.register('COAL_ORE', {
         hardness: 3.5,
-        textureFn: makeOreTex(25,25,25, 17),
+        texture: 'coal_ore',
         particle: { colors: [[.18,.18,.18],[.12,.12,.12]], variance:.05, sound:'break_stone' },
     });
 
     ids.IRON_ORE = registry.register('IRON_ORE', {
         hardness: 4,
-        textureFn: makeOreTex(180,140,120, 19),
+        texture: 'iron_ore',
         particle: { colors: [[.72,.56,.46],[.60,.44,.34]], variance:.07, sound:'break_stone' },
     });
 
     ids.GOLD_ORE = registry.register('GOLD_ORE', {
         hardness: 4.5,
-        textureFn: makeOreTex(220,190,40, 21),
+        texture: 'gold_ore',
         particle: { colors: [[.90,.75,.15],[.85,.65,.10]], variance:.07, sound:'break_stone' },
     });
 
     ids.BRICK = registry.register('BRICK', {
         hardness: 3,
-        textureFn: brickTex,
+        texture: 'brick',
         particle: { colors: [[.60,.30,.22],[.52,.24,.16]], variance:.06, sound:'break_stone' },
     });
 
     ids.SNOW = registry.register('SNOW', {
         hardness: 0.5,
-        textureFn: snowTex,
+        texture: 'snow',
         particle: { colors: [[.92,.95,1.0],[.85,.88,.95]], variance:.04, sound:'break_snow' },
     });
 
     ids.GRAVEL = registry.register('GRAVEL', {
         hardness: 1,
-        textureFn: gravelTex,
+        texture: 'gravel',
         particle: { colors: [[.50,.48,.44],[.42,.40,.38]], variance:.07, sound:'break_gravel' },
     });
 
     ids.GLASS = registry.register('GLASS', {
         transparent: true, alpha: true, hardness: 0.5,
-        textureFn: glassTex,
+        texture: 'glass',
         particle: { colors: [[.75,.90,.95],[.65,.82,.90]], variance:.05, sound:'break_glass' },
     });
 
     ids.BEDROCK = registry.register('BEDROCK', {
         hardness: 999,
-        textureFn: bedRockTex,
+        texture: 'bedrock',
         particle: { colors: [[.18,.18,.18],[.14,.14,.14]], variance:.04, sound:'break_stone' },
     });
 
     ids.BOOKSHELF = registry.register('BOOKSHELF', {
         hardness: 1.5,
-        textureFn: { top: planksTex, side: bookshelfSide, bottom: planksTex },
+        texture: { top: 'planks', side: 'bookshelf', bottom: 'planks' },
         particle: { colors: [[.55,.30,.08],[.20,.38,.12]], variance:.10, sound:'break_wood' },
     });
 
     ids.TALL_GRASS = registry.register('TALL_GRASS', {
         transparent: true, solid: false, crossMesh: true, hardness: 0,
-        textureFn: tallGrassTex,
+        texture: 'tall_grass',
         particle: { colors: [[.20,.65,.12],[.15,.55,.08]], variance:.06, sound:'break_grass' },
     });
 
     ids.FLOWER_RED = registry.register('FLOWER_RED', {
         transparent: true, solid: false, crossMesh: true, hardness: 0,
-        textureFn: flowerTex(200,20,20, 255,220,50),
+        texture: 'flower_red',
         particle: { colors: [[.85,.12,.08],[.70,.08,.04]], variance:.08, sound:'break_grass' },
     });
 
     ids.FLOWER_YELLOW = registry.register('FLOWER_YELLOW', {
         transparent: true, solid: false, crossMesh: true, hardness: 0,
-        textureFn: flowerTex(240,210,20, 180,120,20),
+        texture: 'flower_yellow',
         particle: { colors: [[.95,.82,.08],[.88,.70,.05]], variance:.08, sound:'break_grass' },
     });
 
     ids.MUSHROOM = registry.register('MUSHROOM', {
         transparent: true, solid: false, crossMesh: true, hardness: 0,
-        textureFn: mushroomTex,
+        texture: 'mushroom',
         particle: { colors: [[.72,.12,.12],[.95,.92,.88]], variance:.08, sound:'break_grass' },
     });
 
     ids.TORCH = registry.register('TORCH', {
         transparent: true, solid: false, crossMesh: true, hardness: 0.1,
-        textureFn: torchTex,
+        texture: 'torch',
         particle: { colors: [[1.0,.70,.10],[1.0,.85,.30]], variance:.10, sound:'break_wood' },
     });
 
     return Object.freeze(ids);
 })();
 
-// ── Кэшированные наборы для быстрой проверки ──────────────────────────────────
+// ── Кэшированные наборы ───────────────────────────────────────────────────────
 
 export const TRANSPARENT  = new Set();
 export const NON_SOLID    = new Set();
@@ -659,7 +395,6 @@ export function generateChunk(cx,cz){
                 else if (y<=waterLevel) { data[idx]=BLOCK.WATER; }
             }
 
-            // Деревья
             if (h>waterLevel&&(biome==='forest'||biome==='plains'||biome==='snow')) {
                 const treeN=noise.noise2D(wx*.5,wz*.5);
                 const treeChance=biome==='forest'?.55:.65;
@@ -685,7 +420,6 @@ export function generateChunk(cx,cz){
                 }
             }
 
-            // Растения
             if (h>waterLevel&&h<CHUNK_HEIGHT-1&&(biome==='plains'||biome==='forest')) {
                 const fi=x*CHUNK_HEIGHT*CHUNK_SIZE+(h+1)*CHUNK_SIZE+z;
                 if (data[fi]===BLOCK.AIR) {
