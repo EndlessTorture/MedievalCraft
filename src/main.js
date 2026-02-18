@@ -4,9 +4,11 @@ import { BLOCK, BLOCK_NAMES, WORLD_SEED, CHUNK_SIZE, RENDER_DIST, CROSS_BLOCKS,
 import { gl, initGL, renderFrame, renderCrosshair,
     buildChunkMesh, deleteChunkMesh, chunkMeshes,
     mat4Perspective, mat4LookAt, mat4Mul, mat4Invert, textureAtlas } from './renderer.js';
-import { initAudio, playSound } from './audio.js';
-import { player, initInput, updatePlayer, getLookDir, getEyePosition, getCameraEffects, raycastFull,
-    PLAYER_EYE_OFFSET } from './player.js';
+import { initAudio, loadAudio } from './audio.js';
+import {
+    player, initInput, updatePlayer, getLookDir, getEyePosition, getCameraEffects, raycastFull,
+    PLAYER_EYE_OFFSET, loadStepSounds
+} from './player.js';
 import { entityManager, ItemEntity } from './entities.js';
 import { ItemStack } from './inventory.js';
 
@@ -330,6 +332,7 @@ function gameLoop(time) {
 
 async function init() {
     const LOAD_TIPS = [
+        'Loading shaders…',
         'Loading textures…',
         'Carving mountains from noise…',
         'Planting ancient forests…',
@@ -341,18 +344,37 @@ async function init() {
         if (tip) loadTip.textContent = tip;
     };
 
-    setLoad(5, LOAD_TIPS[0]);
+    setLoad(2, LOAD_TIPS[0]);
     await delay(50);
 
-    await initGL(canvas, (progress, texName) => {
-        setLoad(5 + progress * 25, `Loading: ${texName}...`);
-    });
+    await initGL(canvas,
+        // onTextureProgress
+        (progress, texName) => {
+            setLoad(10 + progress * 20, `Loading: ${texName}...`);
+        },
+        // onShaderProgress
+        (progress, shaderName) => {
+            setLoad(2 + progress * 8, `Shader: ${shaderName}`);
+        }
+    );
 
-    setLoad(30, LOAD_TIPS[1]);
+    setLoad(30, 'Loading audio...');
+    initAudio();
+
+    try {
+        await loadAudio((progress, file) => {
+            setLoad(30 + progress * 10, `Audio: ${file}`);
+        });
+    } catch (e) {
+        console.warn('Audio loading failed, using generated sounds', e);
+    }
+
+    setLoad(40, 'Loading configs...');
+    await loadStepSounds();
 
     const spawnH = getTerrainHeight(0, 0);
     player.x = .5; player.y = spawnH + 2; player.z = .5;
-    setLoad(50, LOAD_TIPS[2]);
+    setLoad(50, LOAD_TIPS[3]);
 
     const pcx = Math.floor(player.x / CHUNK_SIZE);
     const pcz = Math.floor(player.z / CHUNK_SIZE);
@@ -364,7 +386,7 @@ async function init() {
     for (let i = 0; i < initChunks.length; i++) {
         const [cx, cz] = initChunks[i];
         chunks[chunkKey(cx, cz)] = generateChunk(cx, cz);
-        setLoad(50 + (i/initChunks.length)*30, LOAD_TIPS[(i*4/initChunks.length)|0]);
+        setLoad(50 + (i/initChunks.length)*30, LOAD_TIPS[((i*4/initChunks.length)|0) + 1]);
         if (i % 5 === 0) await delay(1);
     }
 

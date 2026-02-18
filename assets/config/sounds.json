@@ -1,0 +1,23 @@
+{
+  "break_stone":  { "files": ["blocks/stone1.wav", "blocks/stone2.wav", "blocks/stone3.wav"], "volume": 0.4, "pitchVar": 0.1 },
+  "break_dirt":   { "files": ["blocks/dirt1.wav", "blocks/dirt2.wav", "blocks/dirt3.wav"], "volume": 0.4, "pitchVar": 0.1 },
+  "break_grass":  { "files": ["blocks/grass1.wav", "blocks/grass2.wav", "blocks/grass3.wav"], "volume": 0.35, "pitchVar": 0.12 },
+  "break_wood":   { "files": ["blocks/wood1.wav", "blocks/wood2.wav", "blocks/wood3.wav"], "volume": 0.4, "pitchVar": 0.1 },
+  "break_leaves": { "files": ["blocks/leaves1.wav", "blocks/leaves2.wav"], "volume": 0.3, "pitchVar": 0.15 },
+  "break_sand":   { "files": ["blocks/sand1.wav", "blocks/sand2.wav"], "volume": 0.4, "pitchVar": 0.1 },
+  "break_gravel": { "files": ["blocks/gravel1.wav", "blocks/gravel2.wav"], "volume": 0.4, "pitchVar": 0.1 },
+  "break_snow":   { "files": ["blocks/snow1.wav", "blocks/snow2.wav"], "volume": 0.35, "pitchVar": 0.1 },
+  "break_glass":  { "files": ["blocks/glass1.wav", "blocks/glass2.wav"], "volume": 0.5, "pitchVar": 0.08 },
+  "break_water":  { "files": ["blocks/water1.wav"], "volume": 0.4, "pitchVar": 0.1 },
+
+  "step_stone":   { "files": ["player/step_stone1.wav", "player/step_stone2.wav", "player/step_stone3.wav"], "volume": 0.25, "pitchVar": 0.15 },
+  "step_grass":   { "files": ["player/step_grass1.wav", "player/step_grass2.wav", "player/step_grass3.wav"], "volume": 0.2, "pitchVar": 0.15 },
+  "step_sand":    { "files": ["player/step_sand1.wav", "player/step_sand2.wav"], "volume": 0.25, "pitchVar": 0.12 },
+  "step_snow":    { "files": ["player/step_snow1.wav", "player/step_snow2.wav"], "volume": 0.2, "pitchVar": 0.1 },
+  "step_wood":    { "files": ["player/step_wood1.wav", "player/step_wood2.wav"], "volume": 0.25, "pitchVar": 0.12 },
+  "step":         { "files": ["player/step_stone1.wav", "player/step_stone2.wav"], "volume": 0.2, "pitchVar": 0.15 },
+
+  "pickup":       { "files": ["player/pickup.wav"], "volume": 0.3, "pitchVar": 0.2 },
+  "hit":          { "files": ["player/hit.wav"], "volume": 0.35, "pitchVar": 0.1 },
+  "click":        { "files": ["ui/click.wav"], "volume": 0.3, "pitchVar": 0.05 }
+}

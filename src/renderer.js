@@ -81,190 +81,84 @@ export function mat4Invert(a) {
     return m;
 }
 
-// ── Шейдеры ───────────────────────────────────────────────────────────────────
+// ── Загрузка шейдеров из файлов ───────────────────────────────────────────────
 
-const VS_MAIN = `
-attribute vec3 aPos;
-attribute vec2 aUV;
-attribute float aLight;
-attribute float aAO;
-uniform mat4 uMVP;
-varying vec2 vUV;
-varying float vLight;
-varying float vAO;
-varying float vFog;
-void main() {
-    gl_Position = uMVP * vec4(aPos, 1.0);
-    vUV = aUV; vLight = aLight; vAO = aAO;
-    vFog = clamp(length(gl_Position.xyz) / 90.0, 0.0, 1.0);
-}`;
+const SHADER_BASE_PATH = 'assets/config/shaders/';
+const shaderCache = new Map();
 
-const FS_MAIN = `
-precision mediump float;
-varying vec2 vUV;
-varying float vLight;
-varying float vAO;
-varying float vFog;
-uniform sampler2D uTex;
-uniform vec3 uFogColor;
-void main() {
-    vec4 tex = texture2D(uTex, vUV);
-    if (tex.a < 0.1) discard;
-    float light = vLight * vAO;
-    vec3 col = tex.rgb * light;
-    col *= vec3(1.05, 0.98, 0.90);
-    col = mix(col, uFogColor, vFog * vFog);
-    gl_FragColor = vec4(col, tex.a);
-}`;
-
-const VS_PARTICLE = `
-attribute vec3 aPos;
-attribute vec4 aColor;
-attribute float aSize;
-uniform mat4 uMVP;
-varying vec4 vColor;
-varying float vFog;
-void main() {
-    gl_Position = uMVP * vec4(aPos, 1.0);
-    gl_PointSize = aSize * (200.0 / gl_Position.w);
-    vColor = aColor;
-    vFog = clamp(length(gl_Position.xyz) / 90.0, 0.0, 1.0);
-}`;
-
-const FS_PARTICLE = `
-precision mediump float;
-varying vec4 vColor;
-varying float vFog;
-uniform vec3 uFogColor;
-void main() {
-    vec2 p = gl_PointCoord * 2.0 - 1.0;
-    if (dot(p,p) > 1.0) discard;
-    float alpha = vColor.a * (1.0 - dot(p,p));
-    vec3 col = mix(vColor.rgb, uFogColor, vFog * vFog);
-    gl_FragColor = vec4(col, alpha);
-}`;
-
-const VS_SKY = `
-attribute vec2 aPos;
-varying vec2 vPos;
-void main() { gl_Position = vec4(aPos, 0.9999, 1.0); vPos = aPos; }`;
-
-const FS_SKY = `
-precision mediump float;
-varying vec2 vPos;
-uniform float uTime;
-uniform mat4 uInvVP;
-void main() {
-    vec4 nearP = uInvVP * vec4(vPos, -1.0, 1.0);
-    vec4 farP  = uInvVP * vec4(vPos,  1.0, 1.0);
-    vec3 rd = normalize(farP.xyz/farP.w - nearP.xyz/nearP.w);
-    float yDir = rd.y;
-    float dayPhase = uTime * 0.02;
-    float dayTime = sin(dayPhase) * 0.5 + 0.5;
-
-    vec3 dayTop     = vec3(0.25, 0.45, 0.85);
-    vec3 dayHorizon = vec3(0.65, 0.78, 0.92);
-    vec3 nightTop     = vec3(0.01, 0.01, 0.06);
-    vec3 nightHorizon = vec3(0.04, 0.04, 0.10);
-    vec3 top     = mix(nightTop,     dayTop,     dayTime);
-    vec3 horizon = mix(nightHorizon, dayHorizon, dayTime);
-    float t = clamp(yDir * 2.0 + 0.3, 0.0, 1.0);
-    vec3 col = mix(horizon, top, t);
-    if (yDir < 0.0) col = mix(col, horizon * 0.6, clamp(-yDir * 3.0, 0.0, 1.0));
-
-    vec3 sunDir = normalize(vec3(cos(dayPhase)*0.8, sin(dayPhase), sin(dayPhase)*0.3));
-    float sunDot = dot(rd, sunDir);
-    if (sunDir.y > -0.15) {
-        float glow = max(0.0, sunDot);
-        col += vec3(1.0, 0.85, 0.4) * pow(glow, 64.0) * 2.0;
-        col += vec3(1.0, 0.7,  0.3) * pow(glow, 8.0) * 0.3 * dayTime;
-        if (sunDot > 0.9994) col = vec3(1.0, 0.98, 0.85);
+async function loadShaderFile(name) {
+    if (shaderCache.has(name)) {
+        return shaderCache.get(name);
     }
-    vec3 moonDir = -sunDir;
-    float moonDot = dot(rd, moonDir);
-    if (moonDir.y > -0.1 && dayTime < 0.5) {
-        if (moonDot > 0.9997) col = mix(col, vec3(0.8, 0.85, 0.9), 0.9);
-        col += vec3(0.3, 0.35, 0.5) * pow(max(0.0, moonDot), 128.0);
+
+    const response = await fetch(`${SHADER_BASE_PATH}${name}.glsl`);
+    if (!response.ok) {
+        throw new Error(`Failed to load shader: ${name}.glsl (${response.status})`);
     }
-    if (dayTime < 0.35 && yDir > 0.0) {
-        vec3 sc = floor(rd * 300.0);
-        float sh = fract(sin(dot(sc.xy, vec2(12.9898, 78.233)) + sc.z*43.12) * 43758.5453);
-        if (sh > 0.997) {
-            float twinkle = sin(uTime*3.0 + sh*100.0)*0.3 + 0.7;
-            col += vec3(0.7, 0.7, 0.8) * (1.0 - dayTime*2.85) * twinkle;
+
+    const source = await response.text();
+    const parsed = parseShaderFile(source);
+    shaderCache.set(name, parsed);
+    return parsed;
+}
+
+function parseShaderFile(source) {
+    const lines = source.split('\n');
+    let currentSection = null;
+    const sections = { vertex: [], fragment: [] };
+
+    for (const line of lines) {
+        const trimmed = line.trim();
+
+        if (trimmed === '#vertex') {
+            currentSection = 'vertex';
+            continue;
+        }
+        if (trimmed === '#fragment') {
+            currentSection = 'fragment';
+            continue;
+        }
+
+        if (currentSection) {
+            sections[currentSection].push(line);
         }
     }
-    float sunH = 1.0 - abs(sunDir.y);
-    if (sunH > 0.7 && yDir < 0.3 && yDir > -0.1) {
-        float f = (sunH - 0.7) * 3.33;
-        float af = pow(max(0.0, dot(normalize(rd.xz), normalize(sunDir.xz))), 3.0);
-        col += vec3(0.8, 0.3, 0.1) * f * af * 0.5;
+
+    return {
+        vertex: sections.vertex.join('\n'),
+        fragment: sections.fragment.join('\n'),
+    };
+}
+
+async function loadAllShaders(onProgress) {
+    const shaderNames = ['main', 'particle', 'sky', 'ui', 'crack', 'item'];
+    const shaders = {};
+    let loaded = 0;
+
+    for (const name of shaderNames) {
+        try {
+            shaders[name] = await loadShaderFile(name);
+            loaded++;
+            onProgress?.(loaded / shaderNames.length, `${name}.glsl`);
+        } catch (e) {
+            console.error(`Shader load error: ${name}`, e);
+            throw e;
+        }
     }
-    gl_FragColor = vec4(col, 1.0);
-}`;
 
-const VS_UI = `
-attribute vec2 aPos;
-void main() {
-    gl_Position = vec4(aPos, 0.0, 1.0);
-}`;
+    return shaders;
+}
 
-const FS_UI = `
-precision mediump float;
-uniform vec4 uColor;
-void main() {
-    gl_FragColor = uColor;
-}`;
-
-const VS_CRACK = `
-attribute vec3 aPos;
-attribute vec2 aUV;
-uniform mat4 uMVP;
-varying vec2 vUV;
-void main() {
-    gl_Position = uMVP * vec4(aPos, 1.0);
-    vUV = aUV;
-}`;
-
-const FS_CRACK = `
-precision mediump float;
-varying vec2 vUV;
-uniform sampler2D uTex;
-void main() {
-    vec4 tex = texture2D(uTex, vUV);
-    if (tex.a < 0.1) discard;
-    gl_FragColor = tex;
-}`;
-
-const VS_ITEM = `
-attribute vec3 aPos;
-attribute vec2 aUV;
-uniform mat4 uMVP;
-varying vec2 vUV;
-void main() {
-    gl_Position = uMVP * vec4(aPos, 1.0);
-    vUV = aUV;
-}`;
-
-const FS_ITEM = `
-precision mediump float;
-varying vec2 vUV;
-uniform sampler2D uTex;
-uniform float uAlpha;
-void main() {
-    vec4 tex = texture2D(uTex, vUV);
-    if (tex.a < 0.1) discard;
-    gl_FragColor = vec4(tex.rgb, tex.a * uAlpha);
-}`;
-
-// ── Вспомогательные функции WebGL ────────────────────────────────────────────
+// ── Компиляция шейдеров ───────────────────────────────────────────────────────
 
 function compileShader(src, type) {
     const s = gl.createShader(type);
     gl.shaderSource(s, src);
     gl.compileShader(s);
-    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS))
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
         console.error('Shader error:', gl.getShaderInfoLog(s));
+        console.error('Source:', src);
+    }
     return s;
 }
 
@@ -277,6 +171,12 @@ function createProgram(vs, fs) {
         console.error('Program error:', gl.getProgramInfoLog(p));
     return p;
 }
+
+function createProgramFromShader(shader) {
+    return createProgram(shader.vertex, shader.fragment);
+}
+
+// ── Вспомогательные функции VAO ───────────────────────────────────────────────
 
 export function createVAO(pos, uv, light, ao) {
     const make = (data) => {
@@ -534,7 +434,7 @@ let mainProgram, particleProgram, skyProgram, uiProgram, crackProgram, itemProgr
 let glTexture, skyVBO, crosshairVBO, crackVBO, crackUvBuf;
 let itemPosLoc, itemUvLoc, itemAlphaLoc, itemMvpLoc;
 
-export async function initGL(canvas, onTextureProgress = null) {
+export async function initGL(canvas, onTextureProgress = null, onShaderProgress = null) {
     gl = canvas.getContext('webgl', { antialias: false, alpha: false });
     if (!gl) { alert('WebGL не поддерживается.'); return null; }
 
@@ -542,12 +442,15 @@ export async function initGL(canvas, onTextureProgress = null) {
     canvas.height = window.innerHeight;
     gl.viewport(0, 0, canvas.width, canvas.height);
 
-    mainProgram     = createProgram(VS_MAIN,     FS_MAIN);
-    particleProgram = createProgram(VS_PARTICLE, FS_PARTICLE);
-    skyProgram      = createProgram(VS_SKY,      FS_SKY);
-    uiProgram       = createProgram(VS_UI,       FS_UI);
-    crackProgram    = createProgram(VS_CRACK,    FS_CRACK);
-    itemProgram     = createProgram(VS_ITEM,     FS_ITEM);
+    // Загрузка шейдеров из файлов
+    const shaders = await loadAllShaders(onShaderProgress);
+
+    mainProgram     = createProgramFromShader(shaders.main);
+    particleProgram = createProgramFromShader(shaders.particle);
+    skyProgram      = createProgramFromShader(shaders.sky);
+    uiProgram       = createProgramFromShader(shaders.ui);
+    crackProgram    = createProgramFromShader(shaders.crack);
+    itemProgram     = createProgramFromShader(shaders.item);
 
     itemPosLoc   = gl.getAttribLocation(itemProgram, 'aPos');
     itemUvLoc    = gl.getAttribLocation(itemProgram, 'aUV');

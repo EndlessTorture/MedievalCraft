@@ -1,0 +1,25 @@
+{
+  "STONE": "step_stone",
+  "COBBLE": "step_stone",
+  "BRICK": "step_stone",
+  "BEDROCK": "step_stone",
+  "COAL_ORE": "step_stone",
+  "IRON_ORE": "step_stone",
+  "GOLD_ORE": "step_stone",
+  "GLASS": "step_stone",
+
+  "GRASS": "step_grass",
+  "DIRT": "step_grass",
+  "LEAVES": "step_grass",
+
+  "SAND": "step_sand",
+  "GRAVEL": "step_sand",
+
+  "WOOD": "step_wood",
+  "PLANKS": "step_wood",
+  "BOOKSHELF": "step_wood",
+
+  "SNOW": "step_snow",
+
+  "_default": "step_stone"
+}

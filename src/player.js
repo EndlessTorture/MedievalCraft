@@ -13,27 +13,63 @@ const PICKUP_RADIUS = 1.5;
 const MAGNET_RADIUS = 2.5;
 
 // ── Параметры движения ────────────────────────────────────────────────────────
-const GROUND_ACCEL = 20;       // Ускорение на земле
-const GROUND_FRICTION = 12;    // Трение на земле (остановка)
-const AIR_ACCEL = 6;           // Ускорение в воздухе
-const AIR_FRICTION = 0.5;      // Трение в воздухе
+const GROUND_ACCEL = 20;
+const GROUND_FRICTION = 12;
+const AIR_ACCEL = 6;
+const AIR_FRICTION = 0.5;
 const SPRINT_MULTIPLIER = 1.4;
 const MAX_SPEED = 4.0;
 
 // ── View Bobbing параметры ────────────────────────────────────────────────────
-const BOB_FREQUENCY = 1.0;     // Частота покачивания (циклов на блок)
-const BOB_AMPLITUDE_Y = 0.05; // Вертикальное покачивание
-const BOB_AMPLITUDE_X = 0.03; // Горизонтальное покачивание
-const TILT_STRAFE = 0.018;     // Наклон при стрейфе
-const TILT_SPEED = 0.012;      // Наклон при беге
-const TILT_SMOOTHING = 12;     // Скорость сглаживания наклона
-const LAND_BOB_AMOUNT = 0.08;  // Приседание при приземлении
-const LAND_BOB_SPEED = 8;      // Скорость восстановления
+const BOB_FREQUENCY = 1.0;
+const BOB_AMPLITUDE_Y = 0.05;
+const BOB_AMPLITUDE_X = 0.03;
+const TILT_STRAFE = 0.018;
+const TILT_SPEED = 0.012;
+const TILT_SMOOTHING = 12;
+const LAND_BOB_AMOUNT = 0.08;
+const LAND_BOB_SPEED = 8;
+
+// ── Маппинг блоков на звуки шагов (загружается из JSON) ───────────────────────
+let stepSoundsConfig = null;
+let stepSoundsMap = null;
+
+export async function loadStepSounds() {
+    if (stepSoundsConfig) return;
+
+    try {
+        const response = await fetch('assets/config/step_sounds.json');
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        stepSoundsConfig = await response.json();
+    } catch (e) {
+        console.warn('Failed to load step_sounds.json, using defaults', e);
+        stepSoundsConfig = { "_default": "step_stone" };
+    }
+
+    // Преобразуем имена блоков в ID
+    stepSoundsMap = new Map();
+    for (const [blockName, soundType] of Object.entries(stepSoundsConfig)) {
+        if (blockName === '_default') continue;
+        const blockId = BLOCK[blockName];
+        if (blockId !== undefined) {
+            stepSoundsMap.set(blockId, soundType);
+        }
+    }
+}
+
+function getStepSound(blockType) {
+    if (stepSoundsMap && stepSoundsMap.has(blockType)) {
+        return stepSoundsMap.get(blockType);
+    }
+    return stepSoundsConfig?._default ?? 'step_stone';
+}
+
+// ── Остальной код без изменений... ────────────────────────────────────────────
 
 const playerInventory = new Inventory(36);
 const playerHotbar = new Hotbar(playerInventory);
 
-playerInventory.setSlot(0, new ItemStack(BLOCK.GRASS, 64));
+playerInventory.setSlot(0, new ItemStack(BLOCK.SAND, 64));
 playerInventory.setSlot(1, new ItemStack(BLOCK.DIRT, 64));
 playerInventory.setSlot(2, new ItemStack(BLOCK.STONE, 64));
 playerInventory.setSlot(3, new ItemStack(BLOCK.WOOD, 64));
@@ -111,6 +147,41 @@ export function initInput(canvas, onSlotChange) {
         else player.hotbar.selectPrev();
         onSlotChange?.();
     });
+}
+
+// ── Получение блока под ногами ────────────────────────────────────────────────
+
+function getBlockUnderFeet() {
+    const blockBelow = getBlock(
+        Math.floor(player.x),
+        Math.floor(player.y - 0.1),
+        Math.floor(player.z)
+    );
+
+    if (blockBelow !== BLOCK.AIR && blockBelow !== BLOCK.WATER) {
+        return blockBelow;
+    }
+
+    const w = PLAYER_WIDTH;
+    const checkPositions = [
+        [player.x - w, player.z - w],
+        [player.x + w, player.z - w],
+        [player.x - w, player.z + w],
+        [player.x + w, player.z + w],
+    ];
+
+    for (const [x, z] of checkPositions) {
+        const block = getBlock(
+            Math.floor(x),
+            Math.floor(player.y - 0.1),
+            Math.floor(z)
+        );
+        if (block !== BLOCK.AIR && block !== BLOCK.WATER) {
+            return block;
+        }
+    }
+
+    return BLOCK.STONE;
 }
 
 // ── Получение эффектов камеры ─────────────────────────────────────────────────
@@ -256,16 +327,13 @@ function pickupNearbyItems() {
     for (let i = 0; i < items.length; i++) {
         const entity = items[i];
 
-        // Пропускаем мёртвые сущности
         if (entity.dead) continue;
 
-        // Пропускаем сущности с пустым стаком
         if (!entity.itemStack || entity.itemStack.isEmpty()) {
             entity.dead = true;
             continue;
         }
 
-        // Пропускаем если нельзя подобрать (cooldown)
         if (!entity.canPickup()) continue;
 
         const dx = entity.x - pickupX;
@@ -273,29 +341,24 @@ function pickupNearbyItems() {
         const dz = entity.z - pickupZ;
         const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
 
-        // Притягивание
         if (dist < MAGNET_RADIUS && dist > 0.1) {
             entity.attractTo(pickupX, pickupY - 0.3, pickupZ, 0.25);
         }
 
-        // Подбор
         if (dist < PICKUP_RADIUS) {
             const stack = entity.itemStack;
 
-            // Ещё раз проверяем что стак не пустой
             if (stack.isEmpty()) {
                 entity.dead = true;
                 continue;
             }
 
-            const countBefore = stack.count;
             const added = player.inventory.addItemDirect(stack);
 
             if (added > 0) {
                 pickedUp = true;
             }
 
-            // Удаляем entity если стак полностью подобран
             if (stack.count <= 0 || stack.isEmpty()) {
                 entity.dead = true;
             }
@@ -344,7 +407,6 @@ export function updatePlayer(dt, onSpawnParticles, onSpawnItemDrop) {
         if (keys['Space']) my = targetSpeed;
         if (keys['KeyQ']) my = -targetSpeed;
 
-        // В полёте - быстрое плавное ускорение
         const flyAccel = 15;
         player.vx += (inputX * targetSpeed - player.vx) * flyAccel * dt;
         player.vy += (my - player.vy) * flyAccel * dt;
@@ -355,36 +417,29 @@ export function updatePlayer(dt, onSpawnParticles, onSpawnItemDrop) {
         player.z += player.vz * dt;
         player.onGround = false;
     } else {
-        // Выбор параметров в зависимости от состояния
         const accel = player.onGround ? GROUND_ACCEL : AIR_ACCEL;
         const friction = player.onGround ? GROUND_FRICTION : AIR_FRICTION;
 
-        // Целевая скорость
         const targetVx = inputX * targetSpeed;
         const targetVz = inputZ * targetSpeed;
 
         if (hasInput) {
-            // Плавное ускорение к целевой скорости
             const deltaVx = targetVx - player.vx;
             const deltaVz = targetVz - player.vz;
 
             player.vx += deltaVx * Math.min(1, accel * dt);
             player.vz += deltaVz * Math.min(1, accel * dt);
         } else {
-            // Плавное торможение (трение)
             const frictionMul = Math.exp(-friction * dt);
             player.vx *= frictionMul;
             player.vz *= frictionMul;
 
-            // Обнуление очень малых скоростей
             if (Math.abs(player.vx) < 0.01) player.vx = 0;
             if (Math.abs(player.vz) < 0.01) player.vz = 0;
         }
 
-        // Гравитация
         player.vy += GRAVITY * dt;
 
-        // Вода
         const waterAtFeet = getBlock(Math.floor(player.x), Math.floor(player.y), Math.floor(player.z)) === BLOCK.WATER;
         const waterAtBody = getBlock(Math.floor(player.x), Math.floor(player.y + 0.8), Math.floor(player.z)) === BLOCK.WATER;
         const waterAtHead = getBlock(Math.floor(player.x), Math.floor(player.y + PLAYER_HEIGHT - 0.1), Math.floor(player.z)) === BLOCK.WATER;
@@ -392,19 +447,14 @@ export function updatePlayer(dt, onSpawnParticles, onSpawnItemDrop) {
         const swimming = waterAtBody;
 
         if (inWater) {
-            // Плавучесть
             const buoyancy = swimming ? 20 : 12;
             player.vy += buoyancy * dt;
-
-            // Ограничение падения
             player.vy = Math.max(player.vy, -3);
 
-            // Сопротивление воды
             player.vy *= Math.exp(-3 * dt);
             player.vx *= Math.exp(-1.5 * dt);
             player.vz *= Math.exp(-1.5 * dt);
 
-            // Плавание
             if (keys['Space']) {
                 player.vy += 15 * dt;
                 player.vy = Math.min(player.vy, 5);
@@ -413,22 +463,18 @@ export function updatePlayer(dt, onSpawnParticles, onSpawnItemDrop) {
                 player.vy -= 10 * dt;
             }
 
-            // Выпрыгивание на поверхности
             if (!waterAtHead && keys['Space'] && player.vy > 2) {
                 player.vy = JUMP_VEL * 0.8;
             }
         } else {
-            // Прыжок на земле
             if (keys['Space'] && player.onGround) {
                 player.vy = JUMP_VEL;
                 player.onGround = false;
             }
         }
 
-        // Сохраняем состояние до коллизии
         player.wasOnGround = player.onGround;
 
-        // Коллизии
         const r = collide(player.x, player.y, player.z, player.vx, player.vy, player.vz, dt);
         player.x = r.x;
         player.y = r.y;
@@ -436,7 +482,6 @@ export function updatePlayer(dt, onSpawnParticles, onSpawnItemDrop) {
         player.vy = r.vy;
         player.onGround = r.onGround;
 
-        // Эффект приземления
         if (player.onGround && !player.wasOnGround && player.vy === 0) {
             const fallSpeed = Math.abs(player.lastMoveSpeed);
             if (fallSpeed > 5) {
@@ -450,32 +495,25 @@ export function updatePlayer(dt, onSpawnParticles, onSpawnItemDrop) {
     player.lastMoveSpeed = player.vy;
 
     if (player.onGround && horizontalSpeed > 0.5 && !player.flying) {
-        // Увеличиваем фазу покачивания пропорционально скорости
         player.bobPhase += dt * BOB_FREQUENCY * horizontalSpeed;
 
-        // Плавно увеличиваем интенсивность
         const targetIntensity = Math.min(1, horizontalSpeed / MAX_SPEED);
         player.bobIntensity += (targetIntensity - player.bobIntensity) * dt * 10;
     } else {
-        // Плавно уменьшаем интенсивность
         player.bobIntensity *= Math.exp(-8 * dt);
         if (player.bobIntensity < 0.01) player.bobIntensity = 0;
     }
 
     // ── Camera Tilt (наклон) ──────────────────────────────────────────────────
-    // Наклон при стрейфе
     let targetTilt = 0;
     if (horizontalSpeed > 0.5) {
-        // Наклон при боковом движении
         targetTilt = strafeDir * TILT_STRAFE * (horizontalSpeed / MAX_SPEED);
 
-        // Дополнительный наклон при спринте
         if (player.sprinting) {
             targetTilt += TILT_SPEED * Math.sin(player.bobPhase * 0.5);
         }
     }
 
-    // Плавная интерполяция наклона
     player.tiltAngle += (targetTilt - player.tiltAngle) * TILT_SMOOTHING * dt;
 
     // ── Land bob recovery ─────────────────────────────────────────────────────
@@ -484,11 +522,13 @@ export function updatePlayer(dt, onSpawnParticles, onSpawnItemDrop) {
         if (player.landBob < 0.001) player.landBob = 0;
     }
 
-    // ── Шаги ──────────────────────────────────────────────────────────────────
+    // ── Шаги (с учётом типа блока) ────────────────────────────────────────────
     if (player.onGround && horizontalSpeed > 0.5) {
         player.stepTimer += dt * horizontalSpeed;
         if (player.stepTimer > 2.2) {
-            playSound('step');
+            const blockUnder = getBlockUnderFeet();
+            const stepSound = getStepSound(blockUnder);
+            playSound(stepSound, 0.25);
             player.stepTimer = 0;
         }
     }
