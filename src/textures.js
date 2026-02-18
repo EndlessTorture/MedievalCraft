@@ -8,6 +8,7 @@ function loadImage(src) {
         const img = new Image();
         img.onload = () => resolve(img);
         img.onerror = () => reject(new Error(`Failed to load: ${src}`));
+        img.crossOrigin = "Anonymous";
         img.src = src;
     });
 }
