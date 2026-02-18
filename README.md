@@ -1,4 +1,4 @@
-# [MedievalCraft](https://raw.githack.com/EndlessTorture/MedievalCraft/dev/index.html) /dev/
+# [MedievalCraft](https://endlesstorture.github.io/MedievalCraft/)
 <img src="https://i.imgur.com/6XWgDbS.png" width="740" height="404" alt="Demo">
 
 ## Че это ?
