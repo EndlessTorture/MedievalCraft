@@ -1,3 +1,3 @@
 # Тут будут всякие утилиты для игры, которые в коде не участвуют
 
-- [export-features.html](export-textures.html) - экспорт старых текстур в новую систему
+- [export-features.html](export-textures.html) - экспорт старых текстур в новую систему (legacy, не будет обновляться)

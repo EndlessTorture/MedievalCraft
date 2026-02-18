@@ -203,6 +203,60 @@ void main() {
     gl_FragColor = vec4(col, 1.0);
 }`;
 
+const VS_UI = `
+attribute vec2 aPos;
+void main() {
+    gl_Position = vec4(aPos, 0.0, 1.0);
+}`;
+
+const FS_UI = `
+precision mediump float;
+uniform vec4 uColor;
+void main() {
+    gl_FragColor = uColor;
+}`;
+
+const VS_CRACK = `
+attribute vec3 aPos;
+attribute vec2 aUV;
+uniform mat4 uMVP;
+varying vec2 vUV;
+void main() {
+    gl_Position = uMVP * vec4(aPos, 1.0);
+    vUV = aUV;
+}`;
+
+const FS_CRACK = `
+precision mediump float;
+varying vec2 vUV;
+uniform sampler2D uTex;
+void main() {
+    vec4 tex = texture2D(uTex, vUV);
+    if (tex.a < 0.1) discard;
+    gl_FragColor = tex;
+}`;
+
+const VS_ITEM = `
+attribute vec3 aPos;
+attribute vec2 aUV;
+uniform mat4 uMVP;
+varying vec2 vUV;
+void main() {
+    gl_Position = uMVP * vec4(aPos, 1.0);
+    vUV = aUV;
+}`;
+
+const FS_ITEM = `
+precision mediump float;
+varying vec2 vUV;
+uniform sampler2D uTex;
+uniform float uAlpha;
+void main() {
+    vec4 tex = texture2D(uTex, vUV);
+    if (tex.a < 0.1) discard;
+    gl_FragColor = vec4(tex.rgb, tex.a * uAlpha);
+}`;
+
 // ── Вспомогательные функции WebGL ────────────────────────────────────────────
 
 function compileShader(src, type) {
@@ -260,10 +314,41 @@ export function bindVAO(vao, prog) {
 
 export let textureAtlas = null;
 
-// Асинхронная загрузка атласа
 export async function loadTextureAtlas(onProgress = null) {
     textureAtlas = await loadAndBuildAtlas(registry, 'assets/textures/blocks/', onProgress);
     return textureAtlas;
+}
+
+// ── Текстуры трещин ───────────────────────────────────────────────────────────
+
+const crackTextures = [];
+const CRACK_STAGES = 10;
+
+async function loadCrackTextures() {
+    for (let i = 0; i < CRACK_STAGES; i++) {
+        const img = new Image();
+        img.crossOrigin = "Anonymous";
+
+        const loaded = await new Promise((resolve) => {
+            img.onload = () => resolve(img);
+            img.onerror = () => {
+                console.warn(`Failed to load break_stage_${i}.png`);
+                resolve(null);
+            };
+            img.src = `assets/textures/ui/break_stage_${i}.png`;
+        });
+
+        if (loaded) {
+            const tex = gl.createTexture();
+            gl.bindTexture(gl.TEXTURE_2D, tex);
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, loaded);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+            crackTextures.push(tex);
+        }
+    }
 }
 
 // ── Меши чанков ───────────────────────────────────────────────────────────────
@@ -445,7 +530,9 @@ function buildSortedTransparentVAO(key, eyeX, eyeY, eyeZ) {
 
 // ── Публичный API рендера ─────────────────────────────────────────────────────
 
-let mainProgram, particleProgram, skyProgram, glTexture, skyVBO;
+let mainProgram, particleProgram, skyProgram, uiProgram, crackProgram, itemProgram;
+let glTexture, skyVBO, crosshairVBO, crackVBO, crackUvBuf;
+let itemPosLoc, itemUvLoc, itemAlphaLoc, itemMvpLoc;
 
 export async function initGL(canvas, onTextureProgress = null) {
     gl = canvas.getContext('webgl', { antialias: false, alpha: false });
@@ -456,11 +543,19 @@ export async function initGL(canvas, onTextureProgress = null) {
     gl.viewport(0, 0, canvas.width, canvas.height);
 
     mainProgram     = createProgram(VS_MAIN,     FS_MAIN);
-    particleProgram = createProgram(VS_PARTICLE,  FS_PARTICLE);
-    skyProgram      = createProgram(VS_SKY,       FS_SKY);
+    particleProgram = createProgram(VS_PARTICLE, FS_PARTICLE);
+    skyProgram      = createProgram(VS_SKY,      FS_SKY);
+    uiProgram       = createProgram(VS_UI,       FS_UI);
+    crackProgram    = createProgram(VS_CRACK,    FS_CRACK);
+    itemProgram     = createProgram(VS_ITEM,     FS_ITEM);
 
-    // Асинхронная загрузка текстур
+    itemPosLoc   = gl.getAttribLocation(itemProgram, 'aPos');
+    itemUvLoc    = gl.getAttribLocation(itemProgram, 'aUV');
+    itemAlphaLoc = gl.getUniformLocation(itemProgram, 'uAlpha');
+    itemMvpLoc   = gl.getUniformLocation(itemProgram, 'uMVP');
+
     await loadTextureAtlas(onTextureProgress);
+    await loadCrackTextures();
 
     glTexture = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, glTexture);
@@ -478,6 +573,10 @@ export async function initGL(canvas, onTextureProgress = null) {
         new Float32Array([-1,-1, 1,-1, 1,1, -1,-1, 1,1, -1,1]),
         gl.STATIC_DRAW);
 
+    crosshairVBO = gl.createBuffer();
+    crackVBO = gl.createBuffer();
+    crackUvBuf = gl.createBuffer();
+
     gl.enable(gl.DEPTH_TEST);
     gl.enable(gl.CULL_FACE);
     gl.cullFace(gl.BACK);
@@ -486,146 +585,126 @@ export async function initGL(canvas, onTextureProgress = null) {
     return gl;
 }
 
-export function renderFrame({ mvp, invVP, eyePos, gameTime, particles }) {
-    const [eyeX, eyeY, eyeZ] = eyePos;
-    const dayTime = Math.sin(gameTime*.02)*.5+.5;
-    const fogR=.18+dayTime*.47, fogG=.25+dayTime*.5, fogB=.4+dayTime*.45;
+// ── Рендер прицела ────────────────────────────────────────────────────────────
 
-    gl.clearColor(fogR, fogG, fogB, 1);
-    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-
-    // ── Небо
+export function renderCrosshair(canvasWidth, canvasHeight) {
     disableAllAttribs();
-    gl.depthMask(false);
-    gl.disable(gl.CULL_FACE);
-    gl.useProgram(skyProgram);
-    const skyPosLoc = gl.getAttribLocation(skyProgram, 'aPos');
-    gl.bindBuffer(gl.ARRAY_BUFFER, skyVBO);
-    gl.vertexAttribPointer(skyPosLoc, 2, gl.FLOAT, false, 0, 0);
-    enableAttrib(skyPosLoc);
-    gl.uniform1f(gl.getUniformLocation(skyProgram, 'uTime'), gameTime);
-    gl.uniformMatrix4fv(gl.getUniformLocation(skyProgram, 'uInvVP'), false, invVP);
-    gl.drawArrays(gl.TRIANGLES, 0, 6);
-    disableAllAttribs();
-    gl.depthMask(true);
-    gl.enable(gl.CULL_FACE);
-
-    // ── Непрозрачные блоки
-    gl.useProgram(mainProgram);
-    gl.uniformMatrix4fv(gl.getUniformLocation(mainProgram, 'uMVP'), false, mvp);
-    gl.uniform3f(gl.getUniformLocation(mainProgram, 'uFogColor'), fogR, fogG, fogB);
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, glTexture);
-    gl.uniform1i(gl.getUniformLocation(mainProgram, 'uTex'), 0);
-
-    let triCount = 0;
-    for (const key in chunkMeshes) {
-        const mesh = chunkMeshes[key];
-        if (mesh?.opaque) {
-            bindVAO(mesh.opaque.vao, mainProgram);
-            gl.drawArrays(gl.TRIANGLES, 0, mesh.opaque.count);
-            triCount += mesh.opaque.count;
-        }
-    }
-
-    // ── Прозрачные блоки
-    const transparentChunks = Object.keys(chunkMeshes)
-        .filter(key => chunkMeshes[key]?.tQuads?.length)
-        .map(key => {
-            const [ccx,ccz] = key.split(',').map(Number);
-            const chCX=(ccx+.5)*CHUNK_SIZE, chCZ=(ccz+.5)*CHUNK_SIZE;
-            return { key, distSq:(chCX-eyeX)**2+(chCZ-eyeZ)**2 };
-        })
-        .sort((a,b) => b.distSq-a.distSq);
-
+    gl.disable(gl.DEPTH_TEST);
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-    gl.depthMask(false);
-    gl.disable(gl.CULL_FACE);
 
-    for (const { key } of transparentChunks) {
-        const sorted = buildSortedTransparentVAO(key, eyeX, eyeY, eyeZ);
-        if (!sorted) continue;
-        bindVAO(sorted.vao, mainProgram);
-        gl.drawArrays(gl.TRIANGLES, 0, sorted.count);
-        triCount += sorted.count;
-    }
+    gl.useProgram(uiProgram);
 
-    // ── Частицы
-    if (particles.length > 0) {
-        disableAllAttribs();
-        gl.useProgram(particleProgram);
-        gl.uniformMatrix4fv(gl.getUniformLocation(particleProgram, 'uMVP'), false, mvp);
-        gl.uniform3f(gl.getUniformLocation(particleProgram, 'uFogColor'), fogR, fogG, fogB);
+    const size = 12, thickness = 2, gap = 3;
+    const sx = size / canvasWidth * 2;
+    const sy = size / canvasHeight * 2;
+    const tx = thickness / canvasWidth * 2;
+    const ty = thickness / canvasHeight * 2;
+    const gx = gap / canvasWidth * 2;
+    const gy = gap / canvasHeight * 2;
 
-        const pArr=[], cArr=[], sArr=[];
-        for (const p of particles) {
-            pArr.push(p.x, p.y, p.z);
-            cArr.push(p.r, p.g, p.b, p.life/p.maxLife);
-            sArr.push(p.size);
-        }
+    const verts = [
+        -tx/2, gy, tx/2, gy, tx/2, sy, -tx/2, gy, tx/2, sy, -tx/2, sy,
+        -tx/2, -sy, tx/2, -sy, tx/2, -gy, -tx/2, -sy, tx/2, -gy, -tx/2, -gy,
+        -sx, -ty/2, -gx, -ty/2, -gx, ty/2, -sx, -ty/2, -gx, ty/2, -sx, ty/2,
+        gx, -ty/2, sx, -ty/2, sx, ty/2, gx, -ty/2, sx, ty/2, gx, ty/2,
+    ];
 
-        const upload = (name, size, data) => {
-            const buf = gl.createBuffer();
-            gl.bindBuffer(gl.ARRAY_BUFFER, buf);
-            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(data), gl.DYNAMIC_DRAW);
-            const loc = gl.getAttribLocation(particleProgram, name);
-            gl.vertexAttribPointer(loc, size, gl.FLOAT, false, 0, 0);
-            enableAttrib(loc);
-            return buf;
-        };
+    gl.bindBuffer(gl.ARRAY_BUFFER, crosshairVBO);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(verts), gl.DYNAMIC_DRAW);
 
-        const b1=upload('aPos',   3, pArr);
-        const b2=upload('aColor', 4, cArr);
-        const b3=upload('aSize',  1, sArr);
-        gl.drawArrays(gl.POINTS, 0, particles.length);
-        gl.deleteBuffer(b1); gl.deleteBuffer(b2); gl.deleteBuffer(b3);
-    }
+    const posLoc = gl.getAttribLocation(uiProgram, 'aPos');
+    gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
+    enableAttrib(posLoc);
 
+    gl.uniform4f(gl.getUniformLocation(uiProgram, 'uColor'), 1, 1, 1, 0.9);
+    gl.drawArrays(gl.TRIANGLES, 0, 24);
+
+    gl.enable(gl.DEPTH_TEST);
     gl.disable(gl.BLEND);
+    disableAllAttribs();
+}
+
+// ── Рендер трещины на блоке ───────────────────────────────────────────────────
+
+function renderBlockCrackInternal(mvp, blockX, blockY, blockZ, progress) {
+    if (progress <= 0 || crackTextures.length === 0) return;
+
+    const stage = Math.min(Math.floor(progress * CRACK_STAGES), CRACK_STAGES - 1);
+    const tex = crackTextures[stage];
+    if (!tex) return;
+
+    disableAllAttribs();
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    gl.disable(gl.CULL_FACE);
+    gl.depthMask(false);
+
+    gl.enable(gl.POLYGON_OFFSET_FILL);
+    gl.polygonOffset(-1, -1);
+
+    gl.useProgram(crackProgram);
+    gl.uniformMatrix4fv(gl.getUniformLocation(crackProgram, 'uMVP'), false, mvp);
+
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.uniform1i(gl.getUniformLocation(crackProgram, 'uTex'), 0);
+
+    const x = blockX, y = blockY, z = blockZ;
+    const e = 0.001;
+
+    const faces = [
+        [x, y+1+e, z+1,  x+1, y+1+e, z+1,  x+1, y+1+e, z,  x, y+1+e, z],
+        [x, y-e, z,  x+1, y-e, z,  x+1, y-e, z+1,  x, y-e, z+1],
+        [x+1+e, y+1, z,  x+1+e, y+1, z+1,  x+1+e, y, z+1,  x+1+e, y, z],
+        [x-e, y+1, z+1,  x-e, y+1, z,  x-e, y, z,  x-e, y, z+1],
+        [x+1, y+1, z+1+e,  x, y+1, z+1+e,  x, y, z+1+e,  x+1, y, z+1+e],
+        [x, y+1, z-e,  x+1, y+1, z-e,  x+1, y, z-e,  x, y, z-e],
+    ];
+
+    const positions = [];
+    const uvs = [];
+
+    for (const face of faces) {
+        const verts = [
+            [face[0], face[1], face[2]],
+            [face[3], face[4], face[5]],
+            [face[6], face[7], face[8]],
+            [face[9], face[10], face[11]],
+        ];
+        const uvCoords = [[0, 1], [1, 1], [1, 0], [0, 0]];
+
+        for (const idx of [0, 1, 2, 0, 2, 3]) {
+            positions.push(...verts[idx]);
+            uvs.push(...uvCoords[idx]);
+        }
+    }
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, crackVBO);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.DYNAMIC_DRAW);
+
+    const posLoc = gl.getAttribLocation(crackProgram, 'aPos');
+    gl.vertexAttribPointer(posLoc, 3, gl.FLOAT, false, 0, 0);
+    enableAttrib(posLoc);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, crackUvBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(uvs), gl.DYNAMIC_DRAW);
+
+    const uvLoc = gl.getAttribLocation(crackProgram, 'aUV');
+    gl.vertexAttribPointer(uvLoc, 2, gl.FLOAT, false, 0, 0);
+    enableAttrib(uvLoc);
+
+    gl.drawArrays(gl.TRIANGLES, 0, 36);
+
+    gl.disable(gl.POLYGON_OFFSET_FILL);
     gl.depthMask(true);
     gl.enable(gl.CULL_FACE);
+    gl.disable(gl.BLEND);
     disableAllAttribs();
-
-    return triCount;
 }
 
-// ── Рендер сущностей (выпавшие предметы) ──────────────────────────────────────
+// ── Рендер сущностей (внутренняя функция) ─────────────────────────────────────
 
-const VS_ITEM = `
-attribute vec3 aPos;
-attribute vec2 aUV;
-uniform mat4 uMVP;
-varying vec2 vUV;
-void main() {
-    gl_Position = uMVP * vec4(aPos, 1.0);
-    vUV = aUV;
-}`;
-
-const FS_ITEM = `
-precision mediump float;
-varying vec2 vUV;
-uniform sampler2D uTex;
-uniform float uAlpha;
-void main() {
-    vec4 tex = texture2D(uTex, vUV);
-    if (tex.a < 0.1) discard;
-    gl_FragColor = vec4(tex.rgb, tex.a * uAlpha);
-}`;
-
-let itemProgram = null;
-let itemPosLoc, itemUvLoc, itemAlphaLoc, itemMvpLoc;
-
-function initItemRenderer() {
-    if (itemProgram) return;
-    itemProgram = createProgram(VS_ITEM, FS_ITEM);
-    itemPosLoc = gl.getAttribLocation(itemProgram, 'aPos');
-    itemUvLoc = gl.getAttribLocation(itemProgram, 'aUV');
-    itemAlphaLoc = gl.getUniformLocation(itemProgram, 'uAlpha');
-    itemMvpLoc = gl.getUniformLocation(itemProgram, 'uMVP');
-}
-
-// Создание куба с ПРАВИЛЬНЫМИ UV (копируем логику из buildChunkMesh)
 function createItemCubeGeometry(blockType) {
     const uvInfo = textureAtlas.uvMap[blockType];
     if (!uvInfo) return null;
@@ -634,13 +713,12 @@ function createItemCubeGeometry(blockType) {
     const positions = [];
     const uvs = [];
 
-    // UV координаты как в buildChunkMesh
     const addFace = (verts, uv) => {
         const uvC = [
-            [uv.u, uv.v + uv.vh],           // 0: левый верх
-            [uv.u + uv.uw, uv.v + uv.vh],   // 1: правый верх
-            [uv.u + uv.uw, uv.v],           // 2: правый низ
-            [uv.u, uv.v],                   // 3: левый низ
+            [uv.u, uv.v + uv.vh],
+            [uv.u + uv.uw, uv.v + uv.vh],
+            [uv.u + uv.uw, uv.v],
+            [uv.u, uv.v],
         ];
         for (const idx of [0, 1, 2, 0, 2, 3]) {
             positions.push(...verts[idx]);
@@ -648,24 +726,16 @@ function createItemCubeGeometry(blockType) {
         }
     };
 
-    // Грани в том же порядке что и в buildChunkMesh
-    // Top (+Y)
     addFace([[-s, s, s], [s, s, s], [s, s, -s], [-s, s, -s]], uvInfo.top);
-    // Bottom (-Y)
     addFace([[-s, -s, -s], [s, -s, -s], [s, -s, s], [-s, -s, s]], uvInfo.bottom);
-    // +X
     addFace([[s, s, -s], [s, s, s], [s, -s, s], [s, -s, -s]], uvInfo.side);
-    // -X
     addFace([[-s, s, s], [-s, s, -s], [-s, -s, -s], [-s, -s, s]], uvInfo.side);
-    // +Z
     addFace([[s, s, s], [-s, s, s], [-s, -s, s], [s, -s, s]], uvInfo.side);
-    // -Z
     addFace([[-s, s, -s], [s, s, -s], [s, -s, -s], [-s, -s, -s]], uvInfo.side);
 
     return { positions: new Float32Array(positions), uvs: new Float32Array(uvs), count: 36 };
 }
 
-// Billboard - плоский спрайт всегда лицом к камере
 function createItemBillboardGeometry(blockType) {
     const uvInfo = textureAtlas.uvMap[blockType];
     if (!uvInfo) return null;
@@ -673,15 +743,14 @@ function createItemBillboardGeometry(blockType) {
     const uv = uvInfo.side;
     const s = 0.2;
 
-    // Плоскость в XY, будет повёрнута к камере
     const positions = new Float32Array([
         -s, 0, 0,    s, 0, 0,    s, s*2, 0,
         -s, 0, 0,    s, s*2, 0,  -s, s*2, 0,
     ]);
 
     const uvs = new Float32Array([
-        uv.u, uv.v,                         uv.u + uv.uw, uv.v,                         uv.u + uv.uw, uv.v + uv.vh,
-        uv.u, uv.v,                         uv.u + uv.uw, uv.v + uv.vh,                 uv.u, uv.v + uv.vh,
+        uv.u, uv.v, uv.u + uv.uw, uv.v, uv.u + uv.uw, uv.v + uv.vh,
+        uv.u, uv.v, uv.u + uv.uw, uv.v + uv.vh, uv.u, uv.v + uv.vh,
     ]);
 
     return { positions, uvs, count: 6, isBillboard: true };
@@ -720,16 +789,18 @@ function createTransformMatrix(tx, ty, tz, rotY, scale) {
     ]);
 }
 
-export function renderItemEntities(entities, mvp, eyePos, crossBlocks) {
+function renderItemEntitiesInternal(entities, mvp, eyePos, crossBlocks) {
     if (!entities.length) return;
 
-    initItemRenderer();
+    disableAllAttribs();
     gl.useProgram(itemProgram);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, glTexture);
-    gl.enable(gl.BLEND);
-    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-    gl.disable(gl.CULL_FACE);
+
+    gl.depthMask(true);
+    gl.enable(gl.DEPTH_TEST);
+
+    let lastIsBillboard = null;
 
     for (let i = 0; i < entities.length; i++) {
         const entity = entities[i];
@@ -740,20 +811,28 @@ export function renderItemEntities(entities, mvp, eyePos, crossBlocks) {
         const geom = getItemGeometry(blockType, isCross);
         if (!geom) continue;
 
+        if (geom.isBillboard !== lastIsBillboard) {
+            if (geom.isBillboard) {
+                gl.disable(gl.CULL_FACE);
+            } else {
+                gl.enable(gl.CULL_FACE);
+            }
+            lastIsBillboard = geom.isBillboard;
+        }
+
         const ey = entity.getRenderY();
         let rotY;
 
         if (geom.isBillboard) {
-            // Billboard смотрит на камеру
             rotY = Math.atan2(eyePos[0] - entity.x, eyePos[2] - entity.z);
         } else {
             rotY = entity.getRotation();
         }
 
         const scale = 1.0 + Math.min(entity.itemStack.count - 1, 3) * 0.08;
-        const itemMVP = mat4Mul(mvp, createTransformMatrix(entity.x, ey, entity.z, rotY, scale));
+        const entityMVP = mat4Mul(mvp, createTransformMatrix(entity.x, ey, entity.z, rotY, scale));
 
-        gl.uniformMatrix4fv(itemMvpLoc, false, itemMVP);
+        gl.uniformMatrix4fv(itemMvpLoc, false, entityMVP);
         gl.uniform1f(itemAlphaLoc, entity.flashing && Math.sin(entity.age * 10) < 0 ? 0.3 : 1.0);
 
         gl.bindBuffer(gl.ARRAY_BUFFER, geom.posBuf);
@@ -767,8 +846,6 @@ export function renderItemEntities(entities, mvp, eyePos, crossBlocks) {
         gl.drawArrays(gl.TRIANGLES, 0, geom.count);
     }
 
-    gl.enable(gl.CULL_FACE);
-    gl.disable(gl.BLEND);
     disableAllAttribs();
 }
 
@@ -778,4 +855,131 @@ export function clearItemGeometryCache() {
         gl.deleteBuffer(geom.uvBuf);
     }
     itemGeometryCache.clear();
+}
+
+// ── Основной рендер кадра ─────────────────────────────────────────────────────
+
+export function renderFrame({ mvp, invVP, eyePos, gameTime, particles, breakingBlock, entities, crossBlocks }) {
+    const [eyeX, eyeY, eyeZ] = eyePos;
+    const dayTime = Math.sin(gameTime*.02)*.5+.5;
+    const fogR=.18+dayTime*.47, fogG=.25+dayTime*.5, fogB=.4+dayTime*.45;
+
+    gl.clearColor(fogR, fogG, fogB, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+    // ── 1. Небо
+    disableAllAttribs();
+    gl.depthMask(false);
+    gl.disable(gl.CULL_FACE);
+    gl.useProgram(skyProgram);
+    const skyPosLoc = gl.getAttribLocation(skyProgram, 'aPos');
+    gl.bindBuffer(gl.ARRAY_BUFFER, skyVBO);
+    gl.vertexAttribPointer(skyPosLoc, 2, gl.FLOAT, false, 0, 0);
+    enableAttrib(skyPosLoc);
+    gl.uniform1f(gl.getUniformLocation(skyProgram, 'uTime'), gameTime);
+    gl.uniformMatrix4fv(gl.getUniformLocation(skyProgram, 'uInvVP'), false, invVP);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+    disableAllAttribs();
+    gl.depthMask(true);
+    gl.enable(gl.CULL_FACE);
+
+    // ── 2. Непрозрачные блоки
+    gl.useProgram(mainProgram);
+    gl.uniformMatrix4fv(gl.getUniformLocation(mainProgram, 'uMVP'), false, mvp);
+    gl.uniform3f(gl.getUniformLocation(mainProgram, 'uFogColor'), fogR, fogG, fogB);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, glTexture);
+    gl.uniform1i(gl.getUniformLocation(mainProgram, 'uTex'), 0);
+
+    let triCount = 0;
+    for (const key in chunkMeshes) {
+        const mesh = chunkMeshes[key];
+        if (mesh?.opaque) {
+            bindVAO(mesh.opaque.vao, mainProgram);
+            gl.drawArrays(gl.TRIANGLES, 0, mesh.opaque.count);
+            triCount += mesh.opaque.count;
+        }
+    }
+
+    // ── 3. Трещины на ломаемом блоке
+    if (breakingBlock && breakingBlock.progress > 0) {
+        renderBlockCrackInternal(mvp, breakingBlock.x, breakingBlock.y, breakingBlock.z, breakingBlock.progress);
+    }
+
+    // ── 4. Сущности (выпавшие предметы)
+    if (entities && entities.length > 0) {
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
+        renderItemEntitiesInternal(entities, mvp, eyePos, crossBlocks);
+
+        gl.disable(gl.BLEND);
+    }
+
+    // ── 5. Прозрачные блоки
+    const transparentChunks = Object.keys(chunkMeshes)
+        .filter(key => chunkMeshes[key]?.tQuads?.length)
+        .map(key => {
+            const [ccx,ccz] = key.split(',').map(Number);
+            const chCX=(ccx+.5)*CHUNK_SIZE, chCZ=(ccz+.5)*CHUNK_SIZE;
+            return { key, distSq:(chCX-eyeX)**2+(chCZ-eyeZ)**2 };
+        })
+        .sort((a,b) => b.distSq-a.distSq);
+
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    gl.depthMask(false);
+    gl.disable(gl.CULL_FACE);
+
+    gl.useProgram(mainProgram);
+    gl.uniformMatrix4fv(gl.getUniformLocation(mainProgram, 'uMVP'), false, mvp);
+    gl.uniform3f(gl.getUniformLocation(mainProgram, 'uFogColor'), fogR, fogG, fogB);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, glTexture);
+
+    for (const { key } of transparentChunks) {
+        const sorted = buildSortedTransparentVAO(key, eyeX, eyeY, eyeZ);
+        if (!sorted) continue;
+        bindVAO(sorted.vao, mainProgram);
+        gl.drawArrays(gl.TRIANGLES, 0, sorted.count);
+        triCount += sorted.count;
+    }
+
+    // ── 6. Частицы
+    if (particles.length > 0) {
+        disableAllAttribs();
+        gl.useProgram(particleProgram);
+        gl.uniformMatrix4fv(gl.getUniformLocation(particleProgram, 'uMVP'), false, mvp);
+        gl.uniform3f(gl.getUniformLocation(particleProgram, 'uFogColor'), fogR, fogG, fogB);
+
+        const pArr=[], cArr=[], sArr=[];
+        for (const p of particles) {
+            pArr.push(p.x, p.y, p.z);
+            cArr.push(p.r, p.g, p.b, p.life/p.maxLife);
+            sArr.push(p.size);
+        }
+
+        const upload = (name, size, data) => {
+            const buf = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(data), gl.DYNAMIC_DRAW);
+            const loc = gl.getAttribLocation(particleProgram, name);
+            gl.vertexAttribPointer(loc, size, gl.FLOAT, false, 0, 0);
+            enableAttrib(loc);
+            return buf;
+        };
+
+        const b1=upload('aPos',   3, pArr);
+        const b2=upload('aColor', 4, cArr);
+        const b3=upload('aSize',  1, sArr);
+        gl.drawArrays(gl.POINTS, 0, particles.length);
+        gl.deleteBuffer(b1); gl.deleteBuffer(b2); gl.deleteBuffer(b3);
+    }
+
+    gl.disable(gl.BLEND);
+    gl.depthMask(true);
+    gl.enable(gl.CULL_FACE);
+    disableAllAttribs();
+
+    return triCount;
 }

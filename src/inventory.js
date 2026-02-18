@@ -9,7 +9,10 @@ export class ItemStack {
         this.maxStack = maxStack;
     }
 
-    isEmpty() { return this.count <= 0 || this.type === BLOCK.AIR; }
+    isEmpty() {
+        return this.count <= 0 || this.type === BLOCK.AIR || this.type === 0 || this.type == null;
+    }
+
     isFull() { return this.count >= this.maxStack; }
     getSpace() { return this.maxStack - this.count; }
 
@@ -28,13 +31,26 @@ export class Inventory {
         this.size = size;
         this.slots = new Array(size).fill(null);
         this.dirty = false;
+        this.onChange = null;
     }
 
-    _markDirty() { this.dirty = true; }
+    _markDirty() {
+        this.dirty = true;
+        this.onChange?.();
+    }
+
     clearDirty() { this.dirty = false; }
 
     getSlot(index) {
-        return (index >= 0 && index < this.size) ? this.slots[index] : null;
+        if (index < 0 || index >= this.size) return null;
+
+        const slot = this.slots[index];
+        // Автоматическая очистка пустых слотов при доступе
+        if (slot && slot.isEmpty()) {
+            this.slots[index] = null;
+            return null;
+        }
+        return slot;
     }
 
     setSlot(index, itemStack) {
@@ -43,9 +59,38 @@ export class Inventory {
         this._markDirty();
     }
 
+    // Очистка всех пустых ItemStack
+    cleanup() {
+        let cleaned = false;
+        for (let i = 0; i < this.size; i++) {
+            if (this.slots[i] && this.slots[i].isEmpty()) {
+                this.slots[i] = null;
+                cleaned = true;
+            }
+        }
+        if (cleaned) this._markDirty();
+    }
+
     findEmptySlot() {
         for (let i = 0; i < this.size; i++) {
-            if (!this.slots[i]) return i;
+            const slot = this.slots[i];
+            // Считаем пустой ItemStack тоже пустым слотом
+            if (!slot || slot.isEmpty()) {
+                // Очищаем если это пустой ItemStack
+                if (slot) this.slots[i] = null;
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    // Найти слот с таким же типом предмета, который не полный
+    findMergeSlot(type) {
+        for (let i = 0; i < this.size; i++) {
+            const slot = this.slots[i];
+            if (slot && !slot.isEmpty() && slot.type === type && !slot.isFull()) {
+                return i;
+            }
         }
         return -1;
     }
@@ -62,7 +107,15 @@ export class Inventory {
         // Сначала в существующие стаки того же типа
         for (let i = 0; i < this.size && itemStack.count > 0; i++) {
             const slot = this.slots[i];
-            if (slot && slot.type === type && !slot.isFull()) {
+
+            // Пропускаем null и пустые слоты
+            if (!slot || slot.isEmpty()) {
+                // Очищаем пустые ItemStack
+                if (slot) this.slots[i] = null;
+                continue;
+            }
+
+            if (slot.type === type && !slot.isFull()) {
                 const canAdd = Math.min(itemStack.count, slot.getSpace());
                 slot.count += canAdd;
                 itemStack.count -= canAdd;
@@ -85,14 +138,43 @@ export class Inventory {
         return added;
     }
 
-    // Старый метод для совместимости (используется при установке блоков)
+    // Проверить сколько предметов можно добавить
+    canAdd(type, count = 1, maxStack = 64) {
+        let canAddCount = 0;
+
+        // Считаем место в существующих стаках
+        for (let i = 0; i < this.size && canAddCount < count; i++) {
+            const slot = this.slots[i];
+            if (!slot || slot.isEmpty()) {
+                canAddCount += maxStack;
+            } else if (slot.type === type) {
+                canAddCount += slot.getSpace();
+            }
+        }
+
+        return Math.min(canAddCount, count);
+    }
+
+    // Получить общее количество предметов определённого типа
+    countItems(type) {
+        let total = 0;
+        for (let i = 0; i < this.size; i++) {
+            const slot = this.slots[i];
+            if (slot && !slot.isEmpty() && slot.type === type) {
+                total += slot.count;
+            }
+        }
+        return total;
+    }
+
+    // Старый метод для совместимости
     addItem(itemStack) {
         if (!itemStack || itemStack.isEmpty()) return null;
         let remaining = itemStack.clone();
 
         for (let i = 0; i < this.size && !remaining.isEmpty(); i++) {
             const slot = this.slots[i];
-            if (slot && slot.canMergeWith(remaining)) {
+            if (slot && !slot.isEmpty() && slot.canMergeWith(remaining)) {
                 const canAdd = Math.min(remaining.count, slot.getSpace());
                 slot.count += canAdd;
                 remaining.count -= canAdd;
@@ -129,9 +211,13 @@ export class Hotbar {
     useSelected() {
         const slot = this.getSelected();
         if (!slot || slot.isEmpty()) return false;
+
         slot.count--;
-        if (slot.isEmpty()) {
-            this.inventory.setSlot(this.selectedSlot, null);
+
+        if (slot.count <= 0 || slot.isEmpty()) {
+            // Принудительно очищаем слот
+            this.inventory.slots[this.selectedSlot] = null;
+            this.inventory._markDirty();
         } else {
             this.inventory._markDirty();
         }
@@ -140,7 +226,9 @@ export class Hotbar {
 
     getSlots() {
         const slots = [];
-        for (let i = 0; i < 9; i++) slots.push(this.inventory.getSlot(i));
+        for (let i = 0; i < 9; i++) {
+            slots.push(this.inventory.getSlot(i));
+        }
         return slots;
     }
 }

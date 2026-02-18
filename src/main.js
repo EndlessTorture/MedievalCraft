@@ -1,7 +1,8 @@
 import { BLOCK, BLOCK_NAMES, WORLD_SEED, CHUNK_SIZE, RENDER_DIST, CROSS_BLOCKS,
     chunks, chunkKey, generateChunk, getTerrainHeight, dirtyChunks,
     getParticleProfile } from './world.js';
-import { gl, initGL, renderFrame, renderItemEntities, buildChunkMesh, deleteChunkMesh, chunkMeshes,
+import { gl, initGL, renderFrame, renderCrosshair,
+    buildChunkMesh, deleteChunkMesh, chunkMeshes,
     mat4Perspective, mat4LookAt, mat4Mul, mat4Invert, textureAtlas } from './renderer.js';
 import { initAudio, playSound } from './audio.js';
 import { player, initInput, updatePlayer, getLookDir, getEyePosition, getCameraEffects, raycastFull,
@@ -13,11 +14,13 @@ import { ItemStack } from './inventory.js';
 
 const canvas    = document.getElementById('gameCanvas');
 const infoEl    = document.getElementById('info');
-const crosshair = document.getElementById('crosshair');
 const hotbarEl  = document.getElementById('hotbar');
 const loadFill  = document.getElementById('loadFill');
 const loadTip   = document.getElementById('loadTip');
 const loadingEl = document.getElementById('loading');
+
+const crosshairEl = document.getElementById('crosshair');
+if (crosshairEl) crosshairEl.style.display = 'none';
 
 // ── Частицы ───────────────────────────────────────────────────────────────────
 
@@ -117,7 +120,7 @@ function updateChunks() {
     entityManager.removeDistant(player.x, player.z, (RENDER_DIST + 3) * CHUNK_SIZE);
 }
 
-// ── HUD - Оптимизированный хотбар ─────────────────────────────────────────────
+// ── HUD ───────────────────────────────────────────────────────────────────────
 
 let hotbarSlots = [];
 let hotbarInited = false;
@@ -219,15 +222,6 @@ function updateHotbar() {
 }
 
 function updateHUD(hit, triCount) {
-    if (player.breakProgress > 0) {
-        const p = Math.min(player.breakProgress, 1);
-        crosshair.style.color = `rgb(255,${(255*(1-p))|0},${(255*(1-p))|0})`;
-        crosshair.textContent = ['✦','✧','✶','✧'][(Date.now()/125)&3];
-    } else {
-        crosshair.style.color = '#fff';
-        crosshair.textContent = '✦';
-    }
-
     const blockName = hit ? (BLOCK_NAMES[hit.block] ?? '?') : '—';
     const moveMode = player.flying ? '✈ Flying' : (player.sprinting ? '🏃 Sprinting' : '🚶 Walking');
     infoEl.innerHTML =
@@ -237,18 +231,6 @@ function updateHUD(hit, triCount) {
         `Target: ${blockName}<br>` +
         `Tris: ${(triCount/3)|0} | Chunks: ${Object.keys(chunkMeshes).length}<br>` +
         `Entities: ${entityManager.count()} | Seed: ${WORLD_SEED}`;
-}
-
-// ── Матрица поворота по оси Z (для tilt) ──────────────────────────────────────
-
-function mat4RotateZ(angle) {
-    const c = Math.cos(angle), s = Math.sin(angle);
-    return new Float32Array([
-        c, s, 0, 0,
-        -s, c, 0, 0,
-        0, 0, 1, 0,
-        0, 0, 0, 1
-    ]);
 }
 
 // ── Игровой цикл ──────────────────────────────────────────────────────────────
@@ -279,37 +261,29 @@ function gameLoop(time) {
     updateParticles(dt);
     updateChunks();
 
-    // ── Камера с эффектами покачивания ────────────────────────────────────────
+    // ── Камера ────────────────────────────────────────────────────────────────
     const aspect = canvas.width / canvas.height;
     const proj = mat4Perspective(70 * Math.PI / 180, aspect, .05, 200);
 
-    // Получаем эффекты камеры
     const camFx = getCameraEffects();
-
-    // Базовая позиция глаз
     const baseEyePos = getEyePosition();
     const lookDir = getLookDir();
 
-    // Вычисляем right вектор для горизонтального смещения
     const rightX = Math.cos(player.yaw);
     const rightZ = -Math.sin(player.yaw);
 
-    // Применяем покачивание к позиции глаз
     const eyePos = [
         baseEyePos[0] + rightX * camFx.bobX,
         baseEyePos[1] + camFx.bobY,
         baseEyePos[2] + rightZ * camFx.bobX
     ];
 
-    // Точка взгляда
     const lookAt = [
         eyePos[0] + lookDir[0],
         eyePos[1] + lookDir[1],
         eyePos[2] + lookDir[2]
     ];
 
-    // Вычисляем up вектор с учетом наклона (tilt)
-    // Наклоняем вектор "вверх" вбок
     const tiltAngle = camFx.tilt;
     const upX = Math.sin(tiltAngle);
     const upY = Math.cos(tiltAngle);
@@ -319,12 +293,37 @@ function gameLoop(time) {
     const mvp = mat4Mul(proj, view);
     const invVP = mat4Invert(mvp);
 
-    const triCount = renderFrame({ mvp, invVP, eyePos, gameTime, particles });
-    renderItemEntities(entityManager.getItemEntities(), mvp, eyePos, CROSS_BLOCKS);
-
-    const [ex, ey, ez] = baseEyePos; // Используем базовую позицию для raycast
+    // Информация о ломаемом блоке
+    const [ex, ey, ez] = baseEyePos;
     const [ldx, ldy, ldz] = lookDir;
-    updateHUD(raycastFull(ex, ey, ez, ldx, ldy, ldz, 5), triCount);
+    const currentHit = raycastFull(ex, ey, ez, ldx, ldy, ldz, 5);
+
+    let breakingBlock = null;
+    if (currentHit && player.breakProgress > 0) {
+        breakingBlock = {
+            x: currentHit.x,
+            y: currentHit.y,
+            z: currentHit.z,
+            progress: player.breakProgress
+        };
+    }
+
+    // Рендер всего в правильном порядке
+    const triCount = renderFrame({
+        mvp,
+        invVP,
+        eyePos,
+        gameTime,
+        particles,
+        breakingBlock,
+        entities: entityManager.getItemEntities(),
+        crossBlocks: CROSS_BLOCKS
+    });
+
+    // Прицел поверх всего
+    renderCrosshair(canvas.width, canvas.height);
+
+    updateHUD(currentHit, triCount);
 }
 
 // ── Инициализация ─────────────────────────────────────────────────────────────

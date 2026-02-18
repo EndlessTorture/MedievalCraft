@@ -256,7 +256,16 @@ function pickupNearbyItems() {
     for (let i = 0; i < items.length; i++) {
         const entity = items[i];
 
+        // Пропускаем мёртвые сущности
         if (entity.dead) continue;
+
+        // Пропускаем сущности с пустым стаком
+        if (!entity.itemStack || entity.itemStack.isEmpty()) {
+            entity.dead = true;
+            continue;
+        }
+
+        // Пропускаем если нельзя подобрать (cooldown)
         if (!entity.canPickup()) continue;
 
         const dx = entity.x - pickupX;
@@ -264,19 +273,31 @@ function pickupNearbyItems() {
         const dz = entity.z - pickupZ;
         const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
 
+        // Притягивание
         if (dist < MAGNET_RADIUS && dist > 0.1) {
             entity.attractTo(pickupX, pickupY - 0.3, pickupZ, 0.25);
         }
 
+        // Подбор
         if (dist < PICKUP_RADIUS) {
             const stack = entity.itemStack;
+
+            // Ещё раз проверяем что стак не пустой
+            if (stack.isEmpty()) {
+                entity.dead = true;
+                continue;
+            }
+
+            const countBefore = stack.count;
             const added = player.inventory.addItemDirect(stack);
 
             if (added > 0) {
                 pickedUp = true;
-                if (stack.count <= 0) {
-                    entity.dead = true;
-                }
+            }
+
+            // Удаляем entity если стак полностью подобран
+            if (stack.count <= 0 || stack.isEmpty()) {
+                entity.dead = true;
             }
         }
     }
@@ -363,19 +384,45 @@ export function updatePlayer(dt, onSpawnParticles, onSpawnItemDrop) {
         // Гравитация
         player.vy += GRAVITY * dt;
 
-        // Прыжок
-        if (keys['Space'] && player.onGround) {
-            player.vy = JUMP_VEL;
-            player.onGround = false;
-        }
-
         // Вода
-        const inWater = getBlock(Math.floor(player.x), Math.floor(player.y + .5), Math.floor(player.z)) === BLOCK.WATER;
+        const waterAtFeet = getBlock(Math.floor(player.x), Math.floor(player.y), Math.floor(player.z)) === BLOCK.WATER;
+        const waterAtBody = getBlock(Math.floor(player.x), Math.floor(player.y + 0.8), Math.floor(player.z)) === BLOCK.WATER;
+        const waterAtHead = getBlock(Math.floor(player.x), Math.floor(player.y + PLAYER_HEIGHT - 0.1), Math.floor(player.z)) === BLOCK.WATER;
+        const inWater = waterAtFeet || waterAtBody;
+        const swimming = waterAtBody;
+
         if (inWater) {
-            player.vy *= .95;
-            player.vx *= .8;
-            player.vz *= .8;
-            if (keys['Space']) player.vy = 3;
+            // Плавучесть
+            const buoyancy = swimming ? 20 : 12;
+            player.vy += buoyancy * dt;
+
+            // Ограничение падения
+            player.vy = Math.max(player.vy, -3);
+
+            // Сопротивление воды
+            player.vy *= Math.exp(-3 * dt);
+            player.vx *= Math.exp(-1.5 * dt);
+            player.vz *= Math.exp(-1.5 * dt);
+
+            // Плавание
+            if (keys['Space']) {
+                player.vy += 15 * dt;
+                player.vy = Math.min(player.vy, 5);
+            }
+            if (keys['ShiftLeft']) {
+                player.vy -= 10 * dt;
+            }
+
+            // Выпрыгивание на поверхности
+            if (!waterAtHead && keys['Space'] && player.vy > 2) {
+                player.vy = JUMP_VEL * 0.8;
+            }
+        } else {
+            // Прыжок на земле
+            if (keys['Space'] && player.onGround) {
+                player.vy = JUMP_VEL;
+                player.onGround = false;
+            }
         }
 
         // Сохраняем состояние до коллизии
