@@ -411,9 +411,13 @@ function gameLoop(time) {
     ];
 
     const tiltAngle = camFx.tilt;
-    const upX = Math.sin(tiltAngle);
-    const upY = Math.cos(tiltAngle);
-    const up = [upX, upY, 0];
+    const camRightX = Math.cos(player.yaw);
+    const camRightZ = -Math.sin(player.yaw);
+    const up = [
+        camRightX * Math.sin(tiltAngle),
+        Math.cos(tiltAngle),
+        camRightZ * Math.sin(tiltAngle)
+    ];
 
     const view = mat4LookAt(eyePos, lookAt, up);
     const mvp = mat4Mul(proj, view);
