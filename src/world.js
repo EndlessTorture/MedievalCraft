@@ -19,6 +19,9 @@ class BlockRegistry {
             alpha:        def.alpha        ?? false,
             // Геймплей
             hardness:     def.hardness     ?? 1,
+            // Освещение
+            lightEmit:    def.lightEmit    ?? null,  // { r, g, b } 0-15
+            lightOpacity: def.lightOpacity ?? (def.transparent ? 1 : 15),
             // Частицы
             particle: {
                 colors:   def.particle?.colors   ?? [[.6,.6,.6]],
@@ -109,6 +112,7 @@ export const BLOCK = (() => {
 
     ids.AIR = registry.register('AIR', {
         transparent: true, solid: false, hardness: 0,
+        lightOpacity: 0,
         texture: null,
         particle: { colors: [[1,1,1]], variance: 0, sound: 'break_stone' },
     });
@@ -139,6 +143,7 @@ export const BLOCK = (() => {
 
     ids.LEAVES = registry.register('LEAVES', {
         transparent: true, hardness: 0.3,
+        lightOpacity: 2,
         texture: 'leaves',
         particle: { colors: [[.15,.50,.10],[.20,.60,.12]], variance:.07, sound:'break_leaves' },
     });
@@ -151,6 +156,7 @@ export const BLOCK = (() => {
 
     ids.WATER = registry.register('WATER', {
         transparent: true, solid: false, alpha: true, hardness: 0,
+        lightOpacity: 3,
         texture: 'water',
         particle: { colors: [[.08,.25,.70],[.10,.35,.80]], variance:.05, sound:'break_water' },
     });
@@ -205,6 +211,7 @@ export const BLOCK = (() => {
 
     ids.GLASS = registry.register('GLASS', {
         transparent: true, alpha: true, hardness: 0.5,
+        lightOpacity: 0,
         texture: 'glass',
         particle: { colors: [[.75,.90,.95],[.65,.82,.90]], variance:.05, sound:'break_glass' },
     });
@@ -223,32 +230,67 @@ export const BLOCK = (() => {
 
     ids.TALL_GRASS = registry.register('TALL_GRASS', {
         transparent: true, solid: false, crossMesh: true, hardness: 0,
+        lightOpacity: 0,
         texture: 'tall_grass',
         particle: { colors: [[.20,.65,.12],[.15,.55,.08]], variance:.06, sound:'break_grass' },
     });
 
     ids.FLOWER_RED = registry.register('FLOWER_RED', {
         transparent: true, solid: false, crossMesh: true, hardness: 0,
+        lightOpacity: 0,
         texture: 'flower_red',
         particle: { colors: [[.85,.12,.08],[.70,.08,.04]], variance:.08, sound:'break_grass' },
     });
 
     ids.FLOWER_YELLOW = registry.register('FLOWER_YELLOW', {
         transparent: true, solid: false, crossMesh: true, hardness: 0,
+        lightOpacity: 0,
         texture: 'flower_yellow',
         particle: { colors: [[.95,.82,.08],[.88,.70,.05]], variance:.08, sound:'break_grass' },
     });
 
     ids.MUSHROOM = registry.register('MUSHROOM', {
         transparent: true, solid: false, crossMesh: true, hardness: 0,
+        lightOpacity: 0,
         texture: 'mushroom',
         particle: { colors: [[.72,.12,.12],[.95,.92,.88]], variance:.08, sound:'break_grass' },
     });
 
     ids.TORCH = registry.register('TORCH', {
         transparent: true, solid: false, crossMesh: true, hardness: 0.1,
+        lightOpacity: 0,
+        lightEmit: { r: 14, g: 11, b: 6 },
         texture: 'torch',
         particle: { colors: [[1.0,.70,.10],[1.0,.85,.30]], variance:.10, sound:'break_wood' },
+    });
+
+    ids.GLOWSTONE = registry.register('GLOWSTONE', {
+        hardness: 1,
+        lightEmit: { r: 15, g: 13, b: 8 },
+        texture: 'glowstone',
+        particle: { colors: [[.95,.85,.40],[.90,.75,.30]], variance:.08, sound:'break_glass' },
+    });
+
+    ids.LAVA = registry.register('LAVA', {
+        transparent: true, solid: false, alpha: true, hardness: 0,
+        lightOpacity: 0,
+        lightEmit: { r: 15, g: 8, b: 2 },
+        texture: 'lava',
+        particle: { colors: [[1.0,.35,.05],[.95,.55,.10]], variance:.10, sound:'break_water' },
+    });
+
+    ids.REDSTONE_LAMP = registry.register('REDSTONE_LAMP', {
+        hardness: 1.5,
+        lightEmit: { r: 15, g: 5, b: 5 },
+        texture: 'redstone_lamp',
+        particle: { colors: [[.85,.25,.20],[.75,.15,.12]], variance:.06, sound:'break_glass' },
+    });
+
+    ids.SEA_LANTERN = registry.register('SEA_LANTERN', {
+        hardness: 1,
+        lightEmit: { r: 2, g: 8, b: 8 },
+        texture: 'sea_lantern',
+        particle: { colors: [[.45,.80,.95],[.35,.70,.88]], variance:.05, sound:'break_glass' },
     });
 
     return Object.freeze(ids);
@@ -260,12 +302,14 @@ export const TRANSPARENT  = new Set();
 export const NON_SOLID    = new Set();
 export const CROSS_BLOCKS = new Set();
 export const ALPHA_BLOCKS = new Set();
+export const LIGHT_EMITTERS = new Set();
 
 for (const [id, def] of registry.all()) {
     if (def.transparent) TRANSPARENT.add(id);
     if (!def.solid)      NON_SOLID.add(id);
     if (def.crossMesh)   CROSS_BLOCKS.add(id);
     if (def.alpha)       ALPHA_BLOCKS.add(id);
+    if (def.lightEmit)   LIGHT_EMITTERS.add(id);
 }
 
 export const BLOCK_NAMES = Object.fromEntries(
@@ -386,6 +430,11 @@ export function generateChunk(cx,cz){
                         const on=noise3.noise3D(wx*.1,y*.1,wz*.1);
                         if      (on>.65) data[idx]=BLOCK.IRON_ORE;
                         else if (on>.50) data[idx]=BLOCK.COAL_ORE;
+                    }
+                    // Лава в глубине
+                    if (y < 5) {
+                        const ln = noise.noise3D(wx*.15,y*.2,wz*.15);
+                        if (ln > .6) data[idx] = BLOCK.LAVA;
                     }
                     const cave=noise.fbm(wx*.05,y*.08,wz*.05,3);
                     if (cave>.45&&y>2&&y<h-5) data[idx]=BLOCK.AIR;

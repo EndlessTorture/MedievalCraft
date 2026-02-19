@@ -6,13 +6,35 @@ export class Entity {
     constructor(x, y, z) {
         this.id = Entity.nextId++;
         this.x = x; this.y = y; this.z = z;
+        this.prevX = x; this.prevY = y; this.prevZ = z;
         this.vx = 0; this.vy = 0; this.vz = 0;
         this.width = 0.25;
         this.height = 0.25;
         this.onGround = false;
         this.dead = false;
         this.age = 0;
+        this.prevAge = 0; // Для интерполяции анимаций
         this.type = 'entity';
+    }
+
+    savePosition() {
+        this.prevX = this.x;
+        this.prevY = this.y;
+        this.prevZ = this.z;
+        this.prevAge = this.age;
+    }
+
+    // Интерполированная позиция для рендера
+    getInterpolatedPos(alpha) {
+        return {
+            x: this.prevX + (this.x - this.prevX) * alpha,
+            y: this.prevY + (this.y - this.prevY) * alpha,
+            z: this.prevZ + (this.z - this.prevZ) * alpha,
+        };
+    }
+
+    getInterpolatedAge(alpha) {
+        return this.prevAge + (this.age - this.prevAge) * alpha;
     }
 
     update(dt) { this.age += dt; }
@@ -23,6 +45,7 @@ export class Entity {
 const GRAVITY = -20;
 const DRAG_AIR = 0.98;
 const DRAG_GROUND = 0.7;
+const MAX_VELOCITY = 30;
 
 function isSolid(bx, by, bz) {
     return !NON_SOLID.has(getBlock(bx, by, bz));
@@ -30,18 +53,20 @@ function isSolid(bx, by, bz) {
 
 function getCollidingBlocks(ex, ey, ez, w, h) {
     const blocks = [];
-    const minX = Math.floor(ex - w), maxX = Math.floor(ex + w);
-    const minY = Math.floor(ey), maxY = Math.floor(ey + h);
-    const minZ = Math.floor(ez - w), maxZ = Math.floor(ez + w);
+    const minX = Math.floor(ex - w + 0.0001);
+    const maxX = Math.floor(ex + w - 0.0001);
+    const minY = Math.floor(ey + 0.0001);
+    const maxY = Math.floor(ey + h - 0.0001);
+    const minZ = Math.floor(ez - w + 0.0001);
+    const maxZ = Math.floor(ez + w - 0.0001);
 
     for (let bx = minX; bx <= maxX; bx++) {
         for (let by = minY; by <= maxY; by++) {
             for (let bz = minZ; bz <= maxZ; bz++) {
                 if (isSolid(bx, by, bz)) {
-                    // Проверяем реальное пересечение
-                    if (ex + w > bx && ex - w < bx + 1 &&
-                        ey + h > by && ey < by + 1 &&
-                        ez + w > bz && ez - w < bz + 1) {
+                    if (ex + w > bx + 0.0001 && ex - w < bx + 1 - 0.0001 &&
+                        ey + h > by + 0.0001 && ey      < by + 1 - 0.0001 &&
+                        ez + w > bz + 0.0001 && ez - w < bz + 1 - 0.0001) {
                         blocks.push({ bx, by, bz });
                     }
                 }
@@ -56,57 +81,68 @@ function applyPhysics(e, dt) {
 
     e.vy += GRAVITY * dt;
 
-    const drag = e.onGround ? DRAG_GROUND : DRAG_AIR;
+    const dragFactor = e.onGround ? DRAG_GROUND : DRAG_AIR;
+    const drag = Math.pow(dragFactor, dt * 60);
     e.vx *= drag;
     e.vz *= drag;
 
-    // Ограничение скорости
-    const maxV = 15;
-    e.vx = Math.max(-maxV, Math.min(maxV, e.vx));
-    e.vy = Math.max(-30, Math.min(maxV, e.vy));
-    e.vz = Math.max(-maxV, Math.min(maxV, e.vz));
+    e.vx = Math.max(-MAX_VELOCITY, Math.min(MAX_VELOCITY, e.vx));
+    e.vy = Math.max(-MAX_VELOCITY, Math.min(MAX_VELOCITY, e.vy));
+    e.vz = Math.max(-MAX_VELOCITY, Math.min(MAX_VELOCITY, e.vz));
 
     e.onGround = false;
 
-    // Y движение
+    // Разбиваем шаг на подшаги при большой скорости
+    const speed = Math.sqrt(e.vx*e.vx + e.vy*e.vy + e.vz*e.vz);
+    const substeps = Math.max(1, Math.ceil(speed * dt / (w * 0.5)));
+    const sdt = dt / substeps;
+
+    for (let step = 0; step < substeps; step++) {
+        _applyPhysicsStep(e, sdt, w, h);
+    }
+}
+
+function _applyPhysicsStep(e, dt, w, h) {
+    const EPS = 0.002;
+
+    // Y
     e.y += e.vy * dt;
     let blocks = getCollidingBlocks(e.x, e.y, e.z, w, h);
     for (const { by } of blocks) {
-        if (e.vy < 0) {
-            e.y = by + 1 + 0.001;
+        if (e.vy <= 0) {
+            e.y = by + 1 + EPS;
             e.vy = 0;
             e.onGround = true;
         } else {
-            e.y = by - h - 0.001;
+            e.y = by - h - EPS;
             e.vy = 0;
         }
     }
 
-    // X движение
+    // X
     e.x += e.vx * dt;
     blocks = getCollidingBlocks(e.x, e.y, e.z, w, h);
     for (const { bx } of blocks) {
         if (e.vx > 0) {
-            e.x = bx - w - 0.001;
+            e.x = bx - w - EPS;
         } else {
-            e.x = bx + 1 + w + 0.001;
+            e.x = bx + 1 + w + EPS;
         }
         e.vx = 0;
     }
 
-    // Z движение
+    // Z
     e.z += e.vz * dt;
     blocks = getCollidingBlocks(e.x, e.y, e.z, w, h);
     for (const { bz } of blocks) {
         if (e.vz > 0) {
-            e.z = bz - w - 0.001;
+            e.z = bz - w - EPS;
         } else {
-            e.z = bz + 1 + w + 0.001;
+            e.z = bz + 1 + w + EPS;
         }
         e.vz = 0;
     }
 
-    // Проверка земли
     if (!e.onGround && getCollidingBlocks(e.x, e.y - 0.02, e.z, w, 0.01).length > 0) {
         e.onGround = true;
     }
@@ -126,7 +162,7 @@ export class ItemEntity extends Entity {
         this.bobPhase = Math.random() * Math.PI * 2;
         this.spinSpeed = 1.5 + Math.random() * 0.5;
         this.flashing = false;
-        this.beingPickedUp = false;  // Притягивается к игроку
+        this.beingPickedUp = false;
 
         const angle = Math.random() * Math.PI * 2;
         this.vx = Math.cos(angle) * 1.5;
@@ -144,11 +180,11 @@ export class ItemEntity extends Entity {
             return;
         }
 
-        // Если притягивается - не применяем обычную физику
         if (!this.beingPickedUp) {
             applyPhysics(this, dt);
         }
 
+        this.beingPickedUp = false;
         this.flashing = this.age > this.lifetime - 30;
     }
 
@@ -156,23 +192,39 @@ export class ItemEntity extends Entity {
         return this.age >= this.pickupDelay;
     }
 
-    // Притянуть к точке
-    attractTo(tx, ty, tz, strength) {
+    attractTo(tx, ty, tz, speed, dt) {
         this.beingPickedUp = true;
         const dx = tx - this.x;
         const dy = ty - this.y;
         const dz = tz - this.z;
-        this.x += dx * strength;
-        this.y += dy * strength;
-        this.z += dz * strength;
+        const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+
+        if (dist < 0.01) return;
+
+        const factor = 1 - Math.exp(-speed * dt * 60);
+        this.x += dx * factor;
+        this.y += dy * factor;
+        this.z += dz * factor;
     }
 
-    getRenderY() {
-        return this.y + Math.sin(this.age * 2.5 + this.bobPhase) * 0.04 + 0.1;
+    // Интерполированная Y позиция с bobbing
+    getRenderY(alpha) {
+        const pos = this.getInterpolatedPos(alpha);
+        const age = this.getInterpolatedAge(alpha);
+        return pos.y + Math.sin(age * 2.5 + this.bobPhase) * 0.04 + 0.1;
     }
 
-    getRotation() {
-        return this.age * this.spinSpeed;
+    // Интерполированный угол вращения
+    getRotation(alpha) {
+        const age = this.getInterpolatedAge(alpha);
+        return age * this.spinSpeed;
+    }
+
+    // Проверка мигания с интерполяцией
+    isFlashing(alpha) {
+        if (!this.flashing) return false;
+        const age = this.getInterpolatedAge(alpha);
+        return Math.sin(age * 10) < 0;
     }
 }
 
@@ -217,6 +269,12 @@ class EntityManager {
             }
         }
         return result;
+    }
+
+    savePositions() {
+        for (const e of this.entities.values()) {
+            e.savePosition();
+        }
     }
 
     update(dt) {

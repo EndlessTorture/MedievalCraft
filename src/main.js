@@ -2,17 +2,22 @@ import { BLOCK, BLOCK_NAMES, WORLD_SEED, CHUNK_SIZE, RENDER_DIST, CROSS_BLOCKS,
     chunks, chunkKey, generateChunk, getTerrainHeight, dirtyChunks,
     getParticleProfile } from './world.js';
 import { gl, initGL, renderFrame, renderCrosshair,
-    buildChunkMesh, deleteChunkMesh, chunkMeshes,
+    buildChunkMesh, deleteChunkMesh, chunkMeshes, freeVAO, transparentBufferCache,
     mat4Perspective, mat4LookAt, mat4Mul, mat4Invert, textureAtlas } from './renderer.js';
+import { calculateChunkLighting, updateLightingForBlock, chunkLightData } from './lighting.js';
 import { initAudio, loadAudio } from './audio.js';
 import {
-    player, initInput, updatePlayer, getLookDir, getEyePosition, getCameraEffects, raycastFull,
-    PLAYER_EYE_OFFSET, loadStepSounds
+    player, initInput, updateCamera, updatePlayerPhysics, updateViewBobbing,
+    updateTilt, updateSteps, updateBlockInteraction,
+    getLookDir, getEyePosition, getInterpolatedEyePosition, getCameraEffects, raycastFull,
+    PLAYER_EYE_OFFSET, loadStepSounds, keys
 } from './player.js';
 import { entityManager, ItemEntity } from './entities.js';
 import { ItemStack } from './inventory.js';
 
-// ── Элементы DOM ──────────────────────────────────────────────────────────────
+const PHYSICS_DT = 1 / 60;
+const MAX_PHYSICS_STEPS = 8;
+const MAX_FRAME_TIME = 0.25;
 
 const canvas    = document.getElementById('gameCanvas');
 const infoEl    = document.getElementById('info');
@@ -24,8 +29,6 @@ const loadingEl = document.getElementById('loading');
 const crosshairEl = document.getElementById('crosshair');
 if (crosshairEl) crosshairEl.style.display = 'none';
 
-// ── Частицы ───────────────────────────────────────────────────────────────────
-
 const particles = [];
 
 function spawnParticles(x, y, z, block, count = 10) {
@@ -33,10 +36,12 @@ function spawnParticles(x, y, z, block, count = 10) {
     for (let i = 0; i < count; i++) {
         const base = prof.colors[(Math.random() * prof.colors.length) | 0];
         const v = prof.variance;
+        const px = x + .5 + (Math.random()-.5)*.6;
+        const py = y + .5 + (Math.random()-.5)*.6;
+        const pz = z + .5 + (Math.random()-.5)*.6;
         particles.push({
-            x: x + .5 + (Math.random()-.5)*.6,
-            y: y + .5 + (Math.random()-.5)*.6,
-            z: z + .5 + (Math.random()-.5)*.6,
+            x: px, y: py, z: pz,
+            prevX: px, prevY: py, prevZ: pz,
             vx: (Math.random()-.5)*3.5,
             vy: Math.random()*4 + 1,
             vz: (Math.random()-.5)*3.5,
@@ -50,7 +55,16 @@ function spawnParticles(x, y, z, block, count = 10) {
     }
 }
 
-function updateParticles(dt) {
+function saveParticlePositions() {
+    for (let i = 0; i < particles.length; i++) {
+        const p = particles[i];
+        p.prevX = p.x;
+        p.prevY = p.y;
+        p.prevZ = p.z;
+    }
+}
+
+function updateParticlesPhysics(dt) {
     for (let i = particles.length - 1; i >= 0; i--) {
         const p = particles[i];
         p.vy -= 15 * dt;
@@ -62,13 +76,9 @@ function updateParticles(dt) {
     }
 }
 
-// ── Выпадение предметов ───────────────────────────────────────────────────────
-
 function spawnItemDrop(x, y, z, blockType) {
     entityManager.add(new ItemEntity(x + 0.5, y + 0.5, z + 0.5, new ItemStack(blockType, 1)));
 }
-
-// ── Управление чанками ────────────────────────────────────────────────────────
 
 const chunkMeshQueue = [];
 
@@ -76,44 +86,80 @@ function updateChunks() {
     const pcx = Math.floor(player.x / CHUNK_SIZE);
     const pcz = Math.floor(player.z / CHUNK_SIZE);
 
+    // 1. Генерация новых чанков
     for (let dx = -RENDER_DIST; dx <= RENDER_DIST; dx++) {
         for (let dz = -RENDER_DIST; dz <= RENDER_DIST; dz++) {
             if (dx*dx + dz*dz > RENDER_DIST*RENDER_DIST) continue;
-            const cx = pcx+dx, cz = pcz+dz;
+            const cx = pcx + dx, cz = pcz + dz;
             const key = chunkKey(cx, cz);
             if (!chunks[key]) {
                 chunks[key] = generateChunk(cx, cz);
+                calculateChunkLighting(cx, cz);
                 chunkMeshQueue.push(key);
-                for (const ak of [chunkKey(cx-1,cz), chunkKey(cx+1,cz), chunkKey(cx,cz-1), chunkKey(cx,cz+1)])
-                    if (chunks[ak] && chunkMeshes[ak]) dirtyChunks.add(ak);
+
+                // Соседи должны перестроить меши — теперь у них есть сосед
+                for (const [ndx, ndz] of [[-1,0],[1,0],[0,-1],[0,1]]) {
+                    const nkey = chunkKey(cx + ndx, cz + ndz);
+                    if (chunks[nkey]) dirtyChunks.add(nkey);
+                }
             }
         }
     }
 
+    // 2. Обновление dirty чанков
     let built = 0;
-    for (const key of dirtyChunks) {
-        if (chunks[key]) {
-            const [cx, cz] = key.split(',').map(Number);
-            deleteChunkMesh(key);
-            chunkMeshes[key] = buildChunkMesh(cx, cz);
-            built++;
-        }
-    }
-    dirtyChunks.clear();
+    const maxBuildsPerFrame = 2;
 
-    while (chunkMeshQueue.length > 0 && built < 3) {
+    const dirtyArray = Array.from(dirtyChunks);
+    for (const key of dirtyArray) {
+        if (built >= maxBuildsPerFrame) break;
+        if (!chunks[key]) {
+            dirtyChunks.delete(key);
+            continue;
+        }
+
+        const [cx, cz] = key.split(',').map(Number);
+
+        const oldMesh = chunkMeshes[key];
+        if (oldMesh) {
+            if (oldMesh.opaque) freeVAO(oldMesh.opaque.vao);
+        }
+        if (transparentBufferCache[key]) {
+            freeVAO(transparentBufferCache[key].vao);
+            delete transparentBufferCache[key];
+        }
+
+        chunkMeshes[key] = buildChunkMesh(cx, cz);
+        dirtyChunks.delete(key);
+        built++;
+    }
+
+    // 3. Построение новых мешей из очереди
+    // Обрабатываем не более maxBuildsPerFrame за кадр
+    // Важно: итерируем только по текущей длине, не добавляя в бесконечный цикл
+    const queueLengthThisFrame = chunkMeshQueue.length;
+    const deferred = [];
+
+    for (let i = 0; i < queueLengthThisFrame && built < maxBuildsPerFrame + 1; i++) {
         const key = chunkMeshQueue.shift();
-        if (chunks[key] && !chunkMeshes[key]) {
-            const [cx, cz] = key.split(',').map(Number);
-            chunkMeshes[key] = buildChunkMesh(cx, cz);
-            built++;
-        }
+        if (!key) break;
+        if (!chunks[key] || chunkMeshes[key]) continue;
+
+        const [cx, cz] = key.split(',').map(Number);
+        chunkMeshes[key] = buildChunkMesh(cx, cz);
+        built++;
     }
 
+    // Отложенные чанки возвращаем в очередь
+    for (const key of deferred) {
+        chunkMeshQueue.push(key);
+    }
+
+    // 4. Выгрузка далёких чанков
     for (const key in chunks) {
         const [cx, cz] = key.split(',').map(Number);
-        const dx = cx-pcx, dz = cz-pcz;
-        if (dx*dx + dz*dz > (RENDER_DIST+2)**2) {
+        const dx = cx - pcx, dz = cz - pcz;
+        if (dx*dx + dz*dz > (RENDER_DIST + 2)**2) {
             deleteChunkMesh(key);
             delete chunks[key];
         }
@@ -121,8 +167,6 @@ function updateChunks() {
 
     entityManager.removeDistant(player.x, player.z, (RENDER_DIST + 3) * CHUNK_SIZE);
 }
-
-// ── HUD ───────────────────────────────────────────────────────────────────────
 
 let hotbarSlots = [];
 let hotbarInited = false;
@@ -223,7 +267,7 @@ function updateHotbar() {
     }
 }
 
-function updateHUD(hit, triCount) {
+function updateHUD(hit, triCount, fps, physicsSteps) {
     const blockName = hit ? (BLOCK_NAMES[hit.block] ?? '?') : '—';
     const moveMode = player.flying ? '✈ Flying' : (player.sprinting ? '🏃 Sprinting' : '🚶 Walking');
     infoEl.innerHTML =
@@ -231,20 +275,39 @@ function updateHUD(hit, triCount) {
         `XYZ: ${player.x.toFixed(1)} / ${player.y.toFixed(1)} / ${player.z.toFixed(1)}<br>` +
         `${moveMode} <small>[F fly, Shift sprint]</small><br>` +
         `Target: ${blockName}<br>` +
+        `FPS: ${fps} | Physics: ${physicsSteps}/frame<br>` +
         `Tris: ${(triCount/3)|0} | Chunks: ${Object.keys(chunkMeshes).length}<br>` +
         `Entities: ${entityManager.count()} | Seed: ${WORLD_SEED}`;
 }
 
-// ── Игровой цикл ──────────────────────────────────────────────────────────────
-
 let gameTime = 0;
 let lastTime = 0;
+let physicsAccumulator = 0;
+let lastHorizontalSpeed = 0;
+let lastStrafeDir = 0;
+
+let frameCount = 0;
+let lastFpsTime = 0;
+let currentFps = 0;
+let lastPhysicsSteps = 0;
 
 function gameLoop(time) {
     requestAnimationFrame(gameLoop);
-    const dt = Math.min((time - lastTime) / 1000, .05);
+
+    let realDt = (time - lastTime) / 1000;
     lastTime = time;
-    gameTime += dt;
+
+    if (realDt > MAX_FRAME_TIME) {
+        realDt = MAX_FRAME_TIME;
+        physicsAccumulator = 0;
+    }
+
+    frameCount++;
+    if (time - lastFpsTime >= 1000) {
+        currentFps = frameCount;
+        frameCount = 0;
+        lastFpsTime = time;
+    }
 
     if (canvas.width !== window.innerWidth || canvas.height !== window.innerHeight) {
         canvas.width = window.innerWidth;
@@ -252,23 +315,60 @@ function gameLoop(time) {
         gl.viewport(0, 0, canvas.width, canvas.height);
     }
 
-    entityManager.update(dt);
-    const hit = updatePlayer(dt, spawnParticles, spawnItemDrop);
+    updateCamera();
+
+    physicsAccumulator += realDt;
+    let physicsSteps = 0;
+
+    while (physicsAccumulator >= PHYSICS_DT && physicsSteps < MAX_PHYSICS_STEPS) {
+        player.savePosition();
+        player.saveVisualState();
+        entityManager.savePositions();
+        saveParticlePositions();
+
+        entityManager.update(PHYSICS_DT);
+
+        const result = updatePlayerPhysics(PHYSICS_DT, spawnParticles, spawnItemDrop);
+        lastHorizontalSpeed = result.horizontalSpeed;
+        lastStrafeDir = result.strafeDir;
+
+        updateViewBobbing(PHYSICS_DT, lastHorizontalSpeed);
+        updateTilt(PHYSICS_DT, lastHorizontalSpeed, lastStrafeDir);
+
+        updateParticlesPhysics(PHYSICS_DT);
+
+        updateSteps(PHYSICS_DT, lastHorizontalSpeed);
+
+        physicsAccumulator -= PHYSICS_DT;
+        physicsSteps++;
+    }
+
+    lastPhysicsSteps = physicsSteps;
+
+    if (physicsAccumulator > PHYSICS_DT * 2) {
+        physicsAccumulator = 0;
+    }
+
+    const alpha = Math.min(1, physicsAccumulator / PHYSICS_DT);
+
+    gameTime += realDt;
+
+    const hit = updateBlockInteraction(realDt, spawnParticles, spawnItemDrop);
 
     if (player.inventory.dirty) {
         player.inventory.clearDirty();
         updateHotbar();
     }
 
-    updateParticles(dt);
     updateChunks();
 
-    // ── Камера ────────────────────────────────────────────────────────────────
     const aspect = canvas.width / canvas.height;
     const proj = mat4Perspective(70 * Math.PI / 180, aspect, .05, 200);
 
-    const camFx = getCameraEffects();
-    const baseEyePos = getEyePosition();
+    const camFx = getCameraEffects(alpha);
+
+    const interpPos = player.getInterpolatedPos(alpha);
+    const baseEyePos = [interpPos.x, interpPos.y + PLAYER_EYE_OFFSET, interpPos.z];
     const lookDir = getLookDir();
 
     const rightX = Math.cos(player.yaw);
@@ -295,8 +395,7 @@ function gameLoop(time) {
     const mvp = mat4Mul(proj, view);
     const invVP = mat4Invert(mvp);
 
-    // Информация о ломаемом блоке
-    const [ex, ey, ez] = baseEyePos;
+    const [ex, ey, ez] = getEyePosition();
     const [ldx, ldy, ldz] = lookDir;
     const currentHit = raycastFull(ex, ey, ez, ldx, ldy, ldz, 5);
 
@@ -310,7 +409,6 @@ function gameLoop(time) {
         };
     }
 
-    // Рендер всего в правильном порядке
     const triCount = renderFrame({
         mvp,
         invVP,
@@ -319,16 +417,14 @@ function gameLoop(time) {
         particles,
         breakingBlock,
         entities: entityManager.getItemEntities(),
-        crossBlocks: CROSS_BLOCKS
+        crossBlocks: CROSS_BLOCKS,
+        alpha
     });
 
-    // Прицел поверх всего
     renderCrosshair(canvas.width, canvas.height);
 
-    updateHUD(currentHit, triCount);
+    updateHUD(currentHit, triCount, currentFps, lastPhysicsSteps);
 }
-
-// ── Инициализация ─────────────────────────────────────────────────────────────
 
 async function init() {
     const LOAD_TIPS = [
@@ -336,7 +432,7 @@ async function init() {
         'Loading textures…',
         'Carving mountains from noise…',
         'Planting ancient forests…',
-        'Hiding ores in the depths…',
+        'Calculating lighting…',
     ];
 
     const setLoad = (pct, tip) => {
@@ -348,11 +444,9 @@ async function init() {
     await delay(50);
 
     await initGL(canvas,
-        // onTextureProgress
         (progress, texName) => {
             setLoad(10 + progress * 20, `Loading: ${texName}...`);
         },
-        // onShaderProgress
         (progress, shaderName) => {
             setLoad(2 + progress * 8, `Shader: ${shaderName}`);
         }
@@ -374,6 +468,7 @@ async function init() {
 
     const spawnH = getTerrainHeight(0, 0);
     player.x = .5; player.y = spawnH + 2; player.z = .5;
+    player.prevX = player.x; player.prevY = player.y; player.prevZ = player.z;
     setLoad(50, LOAD_TIPS[3]);
 
     const pcx = Math.floor(player.x / CHUNK_SIZE);
@@ -383,13 +478,24 @@ async function init() {
         for (let dz=-3;dz<=3;dz++)
             if (dx*dx+dz*dz<=9) initChunks.push([pcx+dx, pcz+dz]);
 
+    // Генерация чанков
     for (let i = 0; i < initChunks.length; i++) {
         const [cx, cz] = initChunks[i];
         chunks[chunkKey(cx, cz)] = generateChunk(cx, cz);
-        setLoad(50 + (i/initChunks.length)*30, LOAD_TIPS[((i*4/initChunks.length)|0) + 1]);
+        setLoad(50 + (i/initChunks.length)*15, LOAD_TIPS[((i*4/initChunks.length)|0) + 1]);
         if (i % 5 === 0) await delay(1);
     }
 
+    // Расчёт освещения
+    setLoad(65, LOAD_TIPS[4]);
+    for (let i = 0; i < initChunks.length; i++) {
+        const [cx, cz] = initChunks[i];
+        calculateChunkLighting(cx, cz);
+        setLoad(65 + (i/initChunks.length)*15);
+        if (i % 3 === 0) await delay(1);
+    }
+
+    // Построение мешей
     for (let i = 0; i < initChunks.length; i++) {
         const [cx, cz] = initChunks[i];
         chunkMeshes[chunkKey(cx, cz)] = buildChunkMesh(cx, cz);
@@ -409,6 +515,10 @@ async function init() {
 
     updateHotbar();
     loadingEl.style.display = 'none';
+
+    lastTime = performance.now();
+    lastFpsTime = lastTime;
+
     requestAnimationFrame(gameLoop);
 }
 

@@ -1,4 +1,5 @@
 import { BLOCK, NON_SOLID, getParticleProfile, getBlock, setBlock, registry } from './world.js';
+import { updateLightingForBlock } from './lighting.js';
 import { Inventory, Hotbar, ItemStack } from './inventory.js';
 import { entityManager } from './entities.js';
 import { playSound } from './audio.js';
@@ -12,15 +13,14 @@ const REACH = 5;
 const PICKUP_RADIUS = 1.5;
 const MAGNET_RADIUS = 2.5;
 
-// ── Параметры движения ────────────────────────────────────────────────────────
 const GROUND_ACCEL = 20;
 const GROUND_FRICTION = 12;
 const AIR_ACCEL = 6;
 const AIR_FRICTION = 0.5;
 const SPRINT_MULTIPLIER = 1.4;
 const MAX_SPEED = 4.0;
+const MAX_FALL_SPEED = 50;
 
-// ── View Bobbing параметры ────────────────────────────────────────────────────
 const BOB_FREQUENCY = 1.0;
 const BOB_AMPLITUDE_Y = 0.05;
 const BOB_AMPLITUDE_X = 0.03;
@@ -30,7 +30,6 @@ const TILT_SMOOTHING = 12;
 const LAND_BOB_AMOUNT = 0.08;
 const LAND_BOB_SPEED = 8;
 
-// ── Маппинг блоков на звуки шагов (загружается из JSON) ───────────────────────
 let stepSoundsConfig = null;
 let stepSoundsMap = null;
 
@@ -46,7 +45,6 @@ export async function loadStepSounds() {
         stepSoundsConfig = { "_default": "step_stone" };
     }
 
-    // Преобразуем имена блоков в ID
     stepSoundsMap = new Map();
     for (const [blockName, soundType] of Object.entries(stepSoundsConfig)) {
         if (blockName === '_default') continue;
@@ -61,27 +59,27 @@ function getStepSound(blockType) {
     if (stepSoundsMap && stepSoundsMap.has(blockType)) {
         return stepSoundsMap.get(blockType);
     }
-    return stepSoundsConfig?._default ?? 'step_stone';
+    return null;
 }
-
-// ── Остальной код без изменений... ────────────────────────────────────────────
 
 const playerInventory = new Inventory(36);
 const playerHotbar = new Hotbar(playerInventory);
 
-playerInventory.setSlot(0, new ItemStack(BLOCK.SAND, 64));
-playerInventory.setSlot(1, new ItemStack(BLOCK.DIRT, 64));
-playerInventory.setSlot(2, new ItemStack(BLOCK.STONE, 64));
-playerInventory.setSlot(3, new ItemStack(BLOCK.WOOD, 64));
-playerInventory.setSlot(4, new ItemStack(BLOCK.PLANKS, 64));
+playerInventory.setSlot(0, new ItemStack(BLOCK.TORCH, 64));
+playerInventory.setSlot(1, new ItemStack(BLOCK.GLOWSTONE, 64));
+playerInventory.setSlot(2, new ItemStack(BLOCK.SEA_LANTERN, 64));
+playerInventory.setSlot(3, new ItemStack(BLOCK.REDSTONE_LAMP, 64));
+playerInventory.setSlot(4, new ItemStack(BLOCK.STONE, 64));
 playerInventory.setSlot(5, new ItemStack(BLOCK.COBBLE, 64));
-playerInventory.setSlot(6, new ItemStack(BLOCK.BRICK, 64));
-playerInventory.setSlot(7, new ItemStack(BLOCK.GLASS, 64));
-playerInventory.setSlot(8, new ItemStack(BLOCK.TORCH, 64));
+playerInventory.setSlot(6, new ItemStack(BLOCK.GLASS, 64));
+playerInventory.setSlot(7, new ItemStack(BLOCK.PLANKS, 64));
+playerInventory.setSlot(8, new ItemStack(BLOCK.WOOD, 64));
 playerInventory.clearDirty();
 
 export const player = {
     x: 0, y: 50, z: 0,
+    prevX: 0, prevY: 50, prevZ: 0,
+
     vx: 0, vy: 0, vz: 0,
     yaw: 0, pitch: 0,
     onGround: false,
@@ -97,13 +95,37 @@ export const player = {
     breakTarget: null,
     stepTimer: 0,
 
-    // View bobbing state
     bobPhase: 0,
     bobIntensity: 0,
     tiltAngle: 0,
-    tiltTarget: 0,
     landBob: 0,
-    lastMoveSpeed: 0,
+    lastFallSpeed: 0,
+
+    prevBobPhase: 0,
+    prevBobIntensity: 0,
+    prevTiltAngle: 0,
+    prevLandBob: 0,
+
+    savePosition() {
+        this.prevX = this.x;
+        this.prevY = this.y;
+        this.prevZ = this.z;
+    },
+
+    saveVisualState() {
+        this.prevBobPhase = this.bobPhase;
+        this.prevBobIntensity = this.bobIntensity;
+        this.prevTiltAngle = this.tiltAngle;
+        this.prevLandBob = this.landBob;
+    },
+
+    getInterpolatedPos(alpha) {
+        return {
+            x: this.prevX + (this.x - this.prevX) * alpha,
+            y: this.prevY + (this.y - this.prevY) * alpha,
+            z: this.prevZ + (this.z - this.prevZ) * alpha,
+        };
+    },
 };
 
 export const keys = {};
@@ -149,8 +171,6 @@ export function initInput(canvas, onSlotChange) {
     });
 }
 
-// ── Получение блока под ногами ────────────────────────────────────────────────
-
 function getBlockUnderFeet() {
     const blockBelow = getBlock(
         Math.floor(player.x),
@@ -181,19 +201,22 @@ function getBlockUnderFeet() {
         }
     }
 
-    return BLOCK.STONE;
+    return BLOCK.AIR;
 }
 
-// ── Получение эффектов камеры ─────────────────────────────────────────────────
+export function getCameraEffects(alpha) {
+    const bobPhase = player.prevBobPhase + (player.bobPhase - player.prevBobPhase) * alpha;
+    const bobIntensity = player.prevBobIntensity + (player.bobIntensity - player.prevBobIntensity) * alpha;
+    const tiltAngle = player.prevTiltAngle + (player.tiltAngle - player.prevTiltAngle) * alpha;
+    const landBob = player.prevLandBob + (player.landBob - player.prevLandBob) * alpha;
 
-export function getCameraEffects() {
-    const bobX = Math.sin(player.bobPhase * 2) * BOB_AMPLITUDE_X * player.bobIntensity;
-    const bobY = -Math.abs(Math.sin(player.bobPhase)) * BOB_AMPLITUDE_Y * player.bobIntensity;
+    const bobX = Math.sin(bobPhase * 2) * BOB_AMPLITUDE_X * bobIntensity;
+    const bobY = -Math.abs(Math.sin(bobPhase)) * BOB_AMPLITUDE_Y * bobIntensity;
 
     return {
         bobX,
-        bobY: bobY - player.landBob,
-        tilt: player.tiltAngle,
+        bobY: bobY - landBob,
+        tilt: tiltAngle,
     };
 }
 
@@ -234,6 +257,11 @@ export function getLookDir() {
 
 export function getEyePosition() {
     return [player.x, player.y + PLAYER_EYE_OFFSET, player.z];
+}
+
+export function getInterpolatedEyePosition(alpha) {
+    const pos = player.getInterpolatedPos(alpha);
+    return [pos.x, pos.y + PLAYER_EYE_OFFSET, pos.z];
 }
 
 function collide(px, py, pz, vx, vy, vz, dt) {
@@ -311,11 +339,9 @@ function collide(px, py, pz, vx, vy, vz, dt) {
     return { x: px, y: py, z: pz, vx, vy, vz, onGround };
 }
 
-// ── Подбор предметов ──────────────────────────────────────────────────────────
-
 let lastPickupSound = 0;
 
-function pickupNearbyItems() {
+function pickupNearbyItems(dt) {
     const pickupX = player.x;
     const pickupY = player.y + PLAYER_HEIGHT * 0.5;
     const pickupZ = player.z;
@@ -342,7 +368,7 @@ function pickupNearbyItems() {
         const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
 
         if (dist < MAGNET_RADIUS && dist > 0.1) {
-            entity.attractTo(pickupX, pickupY - 0.3, pickupZ, 0.25);
+            entity.attractTo(pickupX, pickupY - 0.3, pickupZ, 4.0, dt);
         }
 
         if (dist < PICKUP_RADIUS) {
@@ -371,17 +397,33 @@ function pickupNearbyItems() {
     }
 }
 
-// ── Обновление игрока ─────────────────────────────────────────────────────────
-
-export function updatePlayer(dt, onSpawnParticles, onSpawnItemDrop) {
-    // ── Управление камерой ────────────────────────────────────────────────────
+export function updateCamera() {
     const SENS = 0.002;
     player.yaw -= mouse.dx * SENS;
     player.pitch -= mouse.dy * SENS;
     player.pitch = Math.max(-Math.PI / 2 + .01, Math.min(Math.PI / 2 - .01, player.pitch));
-    mouse.dx = 0; mouse.dy = 0;
+    mouse.dx = 0;
+    mouse.dy = 0;
+}
 
-    // ── Вычисление направления движения ───────────────────────────────────────
+export function updateViewBobbing(dt, horizontalSpeed) {
+    if (player.onGround && horizontalSpeed > 0.5 && !player.flying) {
+        player.bobPhase += dt * BOB_FREQUENCY * horizontalSpeed;
+
+        const targetIntensity = Math.min(1, horizontalSpeed / MAX_SPEED);
+        player.bobIntensity += (targetIntensity - player.bobIntensity) * Math.min(1, dt * 10);
+    } else {
+        player.bobIntensity *= Math.exp(-8 * dt);
+        if (player.bobIntensity < 0.01) player.bobIntensity = 0;
+    }
+
+    if (player.landBob > 0) {
+        player.landBob *= Math.exp(-LAND_BOB_SPEED * dt);
+        if (player.landBob < 0.001) player.landBob = 0;
+    }
+}
+
+export function updatePlayerPhysics(dt, onSpawnParticles, onSpawnItemDrop) {
     const forward = [-Math.sin(player.yaw), 0, -Math.cos(player.yaw)];
     const right = [Math.cos(player.yaw), 0, -Math.sin(player.yaw)];
     let inputX = 0, inputZ = 0;
@@ -397,11 +439,9 @@ export function updatePlayer(dt, onSpawnParticles, onSpawnItemDrop) {
 
     const hasInput = inputLen > 0;
 
-    // ── Спринт ────────────────────────────────────────────────────────────────
     player.sprinting = keys['ShiftLeft'] && hasInput && player.onGround;
     const targetSpeed = MAX_SPEED * (player.sprinting ? SPRINT_MULTIPLIER : 1);
 
-    // ── Плавное движение с инерцией ───────────────────────────────────────────
     if (player.flying) {
         let my = 0;
         if (keys['Space']) my = targetSpeed;
@@ -439,6 +479,7 @@ export function updatePlayer(dt, onSpawnParticles, onSpawnItemDrop) {
         }
 
         player.vy += GRAVITY * dt;
+        player.vy = Math.max(-MAX_FALL_SPEED, player.vy);
 
         const waterAtFeet = getBlock(Math.floor(player.x), Math.floor(player.y), Math.floor(player.z)) === BLOCK.WATER;
         const waterAtBody = getBlock(Math.floor(player.x), Math.floor(player.y + 0.8), Math.floor(player.z)) === BLOCK.WATER;
@@ -474,6 +515,7 @@ export function updatePlayer(dt, onSpawnParticles, onSpawnItemDrop) {
         }
 
         player.wasOnGround = player.onGround;
+        player.lastFallSpeed = player.vy;
 
         const r = collide(player.x, player.y, player.z, player.vx, player.vy, player.vz, dt);
         player.x = r.x;
@@ -483,28 +525,22 @@ export function updatePlayer(dt, onSpawnParticles, onSpawnItemDrop) {
         player.onGround = r.onGround;
 
         if (player.onGround && !player.wasOnGround && player.vy === 0) {
-            const fallSpeed = Math.abs(player.lastMoveSpeed);
+            const fallSpeed = Math.abs(player.lastFallSpeed);
             if (fallSpeed > 5) {
                 player.landBob = Math.min(LAND_BOB_AMOUNT * 2, fallSpeed * 0.015);
             }
         }
     }
 
-    // ── View Bobbing ──────────────────────────────────────────────────────────
+    pickupNearbyItems(dt);
+
+    if (player.y < -10) { player.y = 50; player.vy = 0; }
+
     const horizontalSpeed = Math.sqrt(player.vx * player.vx + player.vz * player.vz);
-    player.lastMoveSpeed = player.vy;
+    return { horizontalSpeed, strafeDir };
+}
 
-    if (player.onGround && horizontalSpeed > 0.5 && !player.flying) {
-        player.bobPhase += dt * BOB_FREQUENCY * horizontalSpeed;
-
-        const targetIntensity = Math.min(1, horizontalSpeed / MAX_SPEED);
-        player.bobIntensity += (targetIntensity - player.bobIntensity) * dt * 10;
-    } else {
-        player.bobIntensity *= Math.exp(-8 * dt);
-        if (player.bobIntensity < 0.01) player.bobIntensity = 0;
-    }
-
-    // ── Camera Tilt (наклон) ──────────────────────────────────────────────────
+export function updateTilt(dt, horizontalSpeed, strafeDir) {
     let targetTilt = 0;
     if (horizontalSpeed > 0.5) {
         targetTilt = strafeDir * TILT_STRAFE * (horizontalSpeed / MAX_SPEED);
@@ -514,32 +550,24 @@ export function updatePlayer(dt, onSpawnParticles, onSpawnItemDrop) {
         }
     }
 
-    player.tiltAngle += (targetTilt - player.tiltAngle) * TILT_SMOOTHING * dt;
+    player.tiltAngle += (targetTilt - player.tiltAngle) * Math.min(1, TILT_SMOOTHING * dt);
+}
 
-    // ── Land bob recovery ─────────────────────────────────────────────────────
-    if (player.landBob > 0) {
-        player.landBob *= Math.exp(-LAND_BOB_SPEED * dt);
-        if (player.landBob < 0.001) player.landBob = 0;
-    }
-
-    // ── Шаги (с учётом типа блока) ────────────────────────────────────────────
+export function updateSteps(dt, horizontalSpeed) {
     if (player.onGround && horizontalSpeed > 0.5) {
         player.stepTimer += dt * horizontalSpeed;
         if (player.stepTimer > 2.2) {
             const blockUnder = getBlockUnderFeet();
             const stepSound = getStepSound(blockUnder);
-            playSound(stepSound, 0.25);
+            if (stepSound != null) {
+                playSound(stepSound, 0.25);
+            }
             player.stepTimer = 0;
         }
     }
+}
 
-    // ── Границы мира ──────────────────────────────────────────────────────────
-    if (player.y < -10) { player.y = 50; player.vy = 0; }
-
-    // ── Подбор предметов ──────────────────────────────────────────────────────
-    pickupNearbyItems();
-
-    // ── Ломание / строительство блоков ────────────────────────────────────────
+export function updateBlockInteraction(dt, onSpawnParticles, onSpawnItemDrop) {
     const [ldx, ldy, ldz] = getLookDir();
     const [eyeX, eyeY, eyeZ] = getEyePosition();
     const hit = raycastFull(eyeX, eyeY, eyeZ, ldx, ldy, ldz, REACH);
@@ -556,7 +584,9 @@ export function updatePlayer(dt, onSpawnParticles, onSpawnItemDrop) {
         if ((prev % .3) > (player.breakProgress % .3)) playSound(prof.sound, .18);
 
         if (player.breakProgress >= 1) {
+            // Ломаем блок и обновляем освещение
             setBlock(hit.x, hit.y, hit.z, BLOCK.AIR);
+            updateLightingForBlock(hit.x, hit.y, hit.z);
             onSpawnParticles(hit.x, hit.y, hit.z, hit.block, 12);
             playSound(prof.sound, .35);
             onSpawnItemDrop?.(hit.x, hit.y, hit.z, hit.block);
@@ -578,7 +608,9 @@ export function updatePlayer(dt, onSpawnParticles, onSpawnItemDrop) {
                 py + 1 > player.y && py < player.y + PLAYER_HEIGHT &&
                 pz + 1 > player.z - w && pz < player.z + w);
             if (!overlap) {
+                // Ставим блок и обновляем освещение
                 setBlock(px, py, pz, selectedItem.type);
+                updateLightingForBlock(px, py, pz);
                 player.hotbar.useSelected();
                 playSound(getParticleProfile(selectedItem.type).sound, .22);
             }

@@ -1,33 +1,60 @@
 #vertex
 attribute vec3 aPos;
 attribute vec2 aUV;
-attribute float aLight;
+attribute vec4 aLight;
 attribute float aAO;
 uniform mat4 uMVP;
 varying vec2 vUV;
-varying float vLight;
+varying vec4 vLight;
 varying float vAO;
 varying float vFog;
+
 void main() {
     gl_Position = uMVP * vec4(aPos, 1.0);
-    vUV = aUV; vLight = aLight; vAO = aAO;
+    vUV = aUV;
+    vLight = aLight;
+    vAO = aAO;
     vFog = clamp(length(gl_Position.xyz) / 90.0, 0.0, 1.0);
 }
 
 #fragment
 precision mediump float;
 varying vec2 vUV;
-varying float vLight;
+varying vec4 vLight;
 varying float vAO;
 varying float vFog;
 uniform sampler2D uTex;
 uniform vec3 uFogColor;
+uniform float uDayTime;
+
 void main() {
     vec4 tex = texture2D(uTex, vUV);
     if (tex.a < 0.1) discard;
-    float light = vLight * vAO;
-    vec3 col = tex.rgb * light;
-    col *= vec3(1.05, 0.98, 0.90);
+
+    float skyBrightness = mix(0.08, 1.0, uDayTime);
+    float skyLight = vLight.x * skyBrightness;
+
+    // RGB block light - each channel independent
+    vec3 blockLight = vLight.yzw;
+    float blockMax = max(blockLight.r, max(blockLight.g, blockLight.b));
+
+    // Sky contributes neutral white light
+    vec3 skyContrib = vec3(skyLight);
+
+    // Block light contributes its full RGB color
+    vec3 blockContrib = blockLight;
+
+    // Take per-channel maximum so colors add properly
+    vec3 lightColor = max(skyContrib, blockContrib);
+
+    // Minimum ambient
+    lightColor = max(lightColor, vec3(0.04));
+
+    // AO
+    lightColor *= vAO;
+
+    vec3 col = tex.rgb * lightColor;
     col = mix(col, uFogColor, vFog * vFog);
+
     gl_FragColor = vec4(col, tex.a);
 }
