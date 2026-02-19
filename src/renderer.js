@@ -3,12 +3,15 @@ import {
     TRANSPARENT, NON_SOLID, CROSS_BLOCKS, ALPHA_BLOCKS,
     chunks, chunkKey, generateChunk, getBlock, isOpaque, dirtyChunks,
     registry,
-} from './world.js';
+} from './world/world.js';
+
 import {
     getLight, getChunkLight, calculateChunkLighting,
     chunkLightData, deleteLightData, MAX_LIGHT
-} from './lighting.js';
-import { loadAndBuildAtlas } from './textures.js';
+} from './world/lighting.js';
+import { loadAndBuildAtlas } from './res/textures.js';
+
+export const FOG_DISTANCE = (RENDER_DIST - 1) * CHUNK_SIZE;
 
 // ── Вспомогательные функции WebGL ────────────────────────────────────────────
 
@@ -812,7 +815,7 @@ function createTransformMatrix(tx, ty, tz, rotY, scale) {
     return new Float32Array([c*scale,0,-s*scale,0, 0,scale,0,0, s*scale,0,c*scale,0, tx,ty,tz,1]);
 }
 
-function renderItemEntitiesInternal(entities, mvp, eyePos, crossBlocks, alpha, dayTime, fogColor) {
+function renderItemEntitiesInternal(entities, mvp, eyePos, crossBlocks, alpha, dayTime, fogColor, fogDist) {
     if (!entities.length) return;
     disableAllAttribs();
     gl.useProgram(itemProgram);
@@ -821,9 +824,9 @@ function renderItemEntitiesInternal(entities, mvp, eyePos, crossBlocks, alpha, d
     gl.depthMask(true);
     gl.enable(gl.DEPTH_TEST);
 
-    // Uniforms которые одинаковы для всех сущностей — устанавливаем один раз
     gl.uniform1f(itemDayTimeLoc,    dayTime);
     gl.uniform3f(itemFogColorLoc,   fogColor[0], fogColor[1], fogColor[2]);
+    gl.uniform1f(gl.getUniformLocation(itemProgram, 'uFogDist'), fogDist);
 
     let lastIsBillboard = null;
 
@@ -843,7 +846,6 @@ function renderItemEntitiesInternal(entities, mvp, eyePos, crossBlocks, alpha, d
         const pos = entity.getInterpolatedPos(alpha);
         const ey  = entity.getRenderY(alpha);
 
-        // Свет в позиции сущности — используем кешированные locations
         const light = getWorldLight(pos.x, ey, pos.z);
         gl.uniform1f(itemSkyLightLoc,    light.sky);
         gl.uniform3f(itemBlockLightLoc,  light.r, light.g, light.b);
@@ -878,6 +880,7 @@ export function renderFrame({ mvp, invVP, eyePos, gameTime, particles, breakingB
     const [eyeX, eyeY, eyeZ] = eyePos;
     const dayTime = Math.sin(gameTime * 0.02) * 0.5 + 0.5;
     const fogR = 0.18 + dayTime * 0.47, fogG = 0.25 + dayTime * 0.5, fogB = 0.4 + dayTime * 0.45;
+    const fogDist = FOG_DISTANCE;
 
     gl.clearColor(fogR, fogG, fogB, 1);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
@@ -903,6 +906,7 @@ export function renderFrame({ mvp, invVP, eyePos, gameTime, particles, breakingB
     gl.uniformMatrix4fv(gl.getUniformLocation(mainProgram, 'uMVP'), false, mvp);
     gl.uniform3f(gl.getUniformLocation(mainProgram, 'uFogColor'), fogR, fogG, fogB);
     gl.uniform1f(gl.getUniformLocation(mainProgram, 'uDayTime'), dayTime);
+    gl.uniform1f(gl.getUniformLocation(mainProgram, 'uFogDist'), fogDist);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, glTexture);
     gl.uniform1i(gl.getUniformLocation(mainProgram, 'uTex'), 0);
@@ -930,7 +934,8 @@ export function renderFrame({ mvp, invVP, eyePos, gameTime, particles, breakingB
         renderItemEntitiesInternal(
             entities, mvp, eyePos, crossBlocks, alpha,
             dayTime,
-            [fogR, fogG, fogB]
+            [fogR, fogG, fogB],
+            fogDist
         );
         gl.disable(gl.BLEND);
     }
@@ -955,6 +960,7 @@ export function renderFrame({ mvp, invVP, eyePos, gameTime, particles, breakingB
         gl.uniformMatrix4fv(gl.getUniformLocation(mainProgram, 'uMVP'), false, mvp);
         gl.uniform3f(gl.getUniformLocation(mainProgram, 'uFogColor'), fogR, fogG, fogB);
         gl.uniform1f(gl.getUniformLocation(mainProgram, 'uDayTime'), dayTime);
+        gl.uniform1f(gl.getUniformLocation(mainProgram, 'uFogDist'), fogDist);
         gl.activeTexture(gl.TEXTURE0);
         gl.bindTexture(gl.TEXTURE_2D, glTexture);
 
@@ -983,6 +989,7 @@ export function renderFrame({ mvp, invVP, eyePos, gameTime, particles, breakingB
         gl.uniformMatrix4fv(gl.getUniformLocation(particleProgram, 'uMVP'), false, mvp);
         gl.uniform3f(gl.getUniformLocation(particleProgram, 'uFogColor'), fogR, fogG, fogB);
         gl.uniform1f(gl.getUniformLocation(particleProgram, 'uDayTime'), dayTime);
+        gl.uniform1f(gl.getUniformLocation(particleProgram, 'uFogDist'), fogDist);
 
         const pArr = [], cArr = [], sArr = [], skyArr = [], blockArr = [];
 
@@ -995,7 +1002,6 @@ export function renderFrame({ mvp, invVP, eyePos, gameTime, particles, breakingB
             cArr.push(p.r, p.g, p.b, p.life / p.maxLife);
             sArr.push(p.size);
 
-            // Свет в позиции частицы
             const light = getWorldLight(ix, iy, iz);
             skyArr.push(light.sky);
             blockArr.push(light.r, light.g, light.b);

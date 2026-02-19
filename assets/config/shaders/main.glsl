@@ -4,6 +4,7 @@ attribute vec2 aUV;
 attribute vec4 aLight;
 attribute float aAO;
 uniform mat4 uMVP;
+uniform float uFogDist;
 varying vec2 vUV;
 varying vec4 vLight;
 varying float vAO;
@@ -14,7 +15,7 @@ void main() {
     vUV = aUV;
     vLight = aLight;
     vAO = aAO;
-    vFog = clamp(length(gl_Position.xyz) / 90.0, 0.0, 1.0);
+    vFog = clamp(length(gl_Position.xyz) / uFogDist, 0.0, 1.0);
 }
 
 #fragment
@@ -34,23 +35,13 @@ void main() {
     float skyBrightness = mix(0.08, 1.0, uDayTime);
     float skyLight = vLight.x * skyBrightness;
 
-    // RGB block light - each channel independent
     vec3 blockLight = vLight.yzw;
-    float blockMax = max(blockLight.r, max(blockLight.g, blockLight.b));
 
-    // Sky contributes neutral white light
     vec3 skyContrib = vec3(skyLight);
-
-    // Block light contributes its full RGB color
     vec3 blockContrib = blockLight;
 
-    // Take per-channel maximum so colors add properly
     vec3 lightColor = max(skyContrib, blockContrib);
-
-    // Minimum ambient
     lightColor = max(lightColor, vec3(0.04));
-
-    // AO
     lightColor *= vAO;
 
     vec3 col = tex.rgb * lightColor;

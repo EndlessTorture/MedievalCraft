@@ -1,8 +1,8 @@
-import { BLOCK, NON_SOLID, getParticleProfile, getBlock, setBlock, registry } from './world.js';
-import { updateLightingForBlock } from './lighting.js';
+import { BLOCK, NON_SOLID, getParticleProfile, getBlock, setBlock, registry } from './world/world.js';
+import { updateLightingForBlock } from './world/lighting.js';
 import { Inventory, Hotbar, ItemStack } from './inventory.js';
-import { entityManager } from './entities.js';
-import { playSound } from './audio.js';
+import { entityManager } from './world/entities.js';
+import { playSound } from './res/audio.js';
 
 const GRAVITY = -22;
 const JUMP_VEL = 7.5;

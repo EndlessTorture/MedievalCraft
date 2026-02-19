@@ -12,19 +12,63 @@ const CONFIG_PATH = 'assets/config/sounds.json';
 // ── Инициализация аудио контекста ─────────────────────────────────────────────
 
 export function initAudio() {
-    if (audioCtx) return;
-
-    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-
-    if (audioCtx.state === 'suspended') {
-        const unlock = () => {
-            audioCtx.resume();
-            document.removeEventListener('click', unlock);
-            document.removeEventListener('touchstart', unlock);
-        };
-        document.addEventListener('click', unlock);
-        document.addEventListener('touchstart', unlock);
+    if (audioCtx) {
+        // Контекст уже есть — просто пробуем resume
+        resumeAudio();
+        return;
     }
+
+    try {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    } catch (e) {
+        console.warn('Failed to create AudioContext:', e);
+        return;
+    }
+
+    // Если контекст suspended — настраиваем автоматическую разблокировку
+    if (audioCtx.state === 'suspended') {
+        setupAutoResume();
+    }
+
+    // Слушаем изменение состояния
+    audioCtx.addEventListener('statechange', () => {
+        console.log(`[Audio] State changed to: ${audioCtx.state}`);
+    });
+}
+
+// Отдельная функция resume — можно вызывать из любого user gesture
+export function resumeAudio() {
+    if (!audioCtx) return;
+    if (audioCtx.state === 'suspended') {
+        audioCtx.resume().then(() => {
+            console.log('[Audio] Context resumed successfully');
+        }).catch(e => {
+            console.warn('[Audio] Resume failed:', e);
+        });
+    }
+}
+
+function setupAutoResume() {
+    const events = ['click', 'touchstart', 'touchend', 'keydown'];
+
+    const unlock = () => {
+        if (!audioCtx) return;
+
+        audioCtx.resume().then(() => {
+            console.log('[Audio] Auto-resumed via user gesture');
+            // Убираем все слушатели после успешного resume
+            events.forEach(evt => {
+                document.removeEventListener(evt, unlock, true);
+            });
+        }).catch(() => {
+            // Не удалось — оставляем слушатели
+        });
+    };
+
+    // capture: true — перехватываем ДО любых preventDefault/stopPropagation
+    events.forEach(evt => {
+        document.addEventListener(evt, unlock, { capture: true, passive: true });
+    });
 }
 
 // ── Загрузка конфигурации звуков ──────────────────────────────────────────────
@@ -50,6 +94,7 @@ export async function loadAudio(onProgress) {
     if (loadPromise) return loadPromise;
 
     loadPromise = (async () => {
+        // Создаём контекст, но НЕ ожидаем resume — он произойдёт при user gesture
         if (!audioCtx) initAudio();
 
         await loadSoundConfig();
@@ -96,7 +141,13 @@ export async function loadAudio(onProgress) {
 // ── Воспроизведение звука ─────────────────────────────────────────────────────
 
 export function playSound(type, volumeMul = 1.0, pitchMul = 1.0) {
-    if (!audioCtx || audioCtx.state === 'suspended' || !soundConfig) return;
+    if (!audioCtx || !soundConfig) return;
+
+    // Автоматически пробуем resume при каждом воспроизведении
+    if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+        return;
+    }
 
     const config = soundConfig[type];
     if (!config) return;

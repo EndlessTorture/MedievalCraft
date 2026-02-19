@@ -6,6 +6,7 @@ attribute float aSkyLight;
 attribute vec3 aBlockLight;
 uniform mat4 uMVP;
 uniform float uDayTime;
+uniform float uFogDist;
 varying vec4 vColor;
 varying float vFog;
 varying vec3 vLightColor;
@@ -14,7 +15,7 @@ void main() {
     gl_Position = uMVP * vec4(aPos, 1.0);
     gl_PointSize = aSize * (200.0 / gl_Position.w);
     vColor = aColor;
-    vFog = clamp(length(gl_Position.xyz) / 90.0, 0.0, 1.0);
+    vFog = clamp(length(gl_Position.xyz) / uFogDist, 0.0, 1.0);
 
     float skyBrightness = mix(0.08, 1.0, uDayTime);
     float skyLight = aSkyLight * skyBrightness;

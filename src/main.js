@@ -1,18 +1,21 @@
+import { isMobile } from './mobile.js';
 import { BLOCK, BLOCK_NAMES, WORLD_SEED, CHUNK_SIZE, RENDER_DIST, CROSS_BLOCKS,
     chunks, chunkKey, generateChunk, getTerrainHeight, dirtyChunks,
-    getParticleProfile } from './world.js';
-import { gl, initGL, renderFrame, renderCrosshair,
+    getParticleProfile } from './world/world.js';
+import {
+    gl, initGL, renderFrame, renderCrosshair,
     buildChunkMesh, deleteChunkMesh, chunkMeshes, freeVAO, transparentBufferCache,
-    mat4Perspective, mat4LookAt, mat4Mul, mat4Invert, textureAtlas } from './renderer.js';
-import { calculateChunkLighting, updateLightingForBlock, chunkLightData } from './lighting.js';
-import { initAudio, loadAudio } from './audio.js';
+    mat4Perspective, mat4LookAt, mat4Mul, mat4Invert, textureAtlas, FOG_DISTANCE
+} from './renderer.js';
+import { calculateChunkLighting, updateLightingForBlock, chunkLightData } from './world/lighting.js';
+import { initAudio, loadAudio } from './res/audio.js';
 import {
     player, initInput, updateCamera, updatePlayerPhysics, updateViewBobbing,
     updateTilt, updateSteps, updateBlockInteraction,
     getLookDir, getEyePosition, getInterpolatedEyePosition, getCameraEffects, raycastFull,
     PLAYER_EYE_OFFSET, loadStepSounds, keys
 } from './player.js';
-import { entityManager, ItemEntity } from './entities.js';
+import { entityManager, ItemEntity } from './world/entities.js';
 import { ItemStack } from './inventory.js';
 
 const PHYSICS_DT = 1 / 60;
@@ -81,36 +84,63 @@ function spawnItemDrop(x, y, z, blockType) {
 }
 
 const chunkMeshQueue = [];
+let genBudgetPerFrame = 1;  // Максимум генераций чанков за кадр
 
 function updateChunks() {
     const pcx = Math.floor(player.x / CHUNK_SIZE);
     const pcz = Math.floor(player.z / CHUNK_SIZE);
 
-    // 1. Генерация новых чанков
+    // 1. Собираем нужные чанки, сортируем по расстоянию (ближние первыми)
+    const needed = [];
     for (let dx = -RENDER_DIST; dx <= RENDER_DIST; dx++) {
         for (let dz = -RENDER_DIST; dz <= RENDER_DIST; dz++) {
-            if (dx*dx + dz*dz > RENDER_DIST*RENDER_DIST) continue;
+            if (dx * dx + dz * dz > RENDER_DIST * RENDER_DIST) continue;
             const cx = pcx + dx, cz = pcz + dz;
             const key = chunkKey(cx, cz);
             if (!chunks[key]) {
-                chunks[key] = generateChunk(cx, cz);
-                calculateChunkLighting(cx, cz);
-                chunkMeshQueue.push(key);
-
-                // Соседи должны перестроить меши — теперь у них есть сосед
-                for (const [ndx, ndz] of [[-1,0],[1,0],[0,-1],[0,1]]) {
-                    const nkey = chunkKey(cx + ndx, cz + ndz);
-                    if (chunks[nkey]) dirtyChunks.add(nkey);
-                }
+                needed.push({ cx, cz, key, dist2: dx * dx + dz * dz });
             }
         }
     }
 
-    // 2. Обновление dirty чанков
-    let built = 0;
-    const maxBuildsPerFrame = 2;
+    // Сортируем — ближние чанки генерируются первыми
+    needed.sort((a, b) => a.dist2 - b.dist2);
 
+    // 2. Генерируем не более genBudgetPerFrame чанков за кадр
+    let generated = 0;
+    for (let i = 0; i < needed.length && generated < genBudgetPerFrame; i++) {
+        const { cx, cz, key } = needed[i];
+
+        chunks[key] = generateChunk(cx, cz);
+        calculateChunkLighting(cx, cz);
+        chunkMeshQueue.push(key);
+        generated++;
+
+        // Соседи должны перестроить меши
+        for (const [ndx, ndz] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+            const nkey = chunkKey(cx + ndx, cz + ndz);
+            if (chunks[nkey]) dirtyChunks.add(nkey);
+        }
+    }
+
+    // 3. Адаптивный бюджет — если FPS высокий, генерируем больше
+    // (genBudgetPerFrame регулируется снаружи или оставляем 1)
+
+    // 4. Обновление dirty чанков
+    const maxBuildsPerFrame = 3;
+    let built = 0;
+
+    // Приоритет dirty перед новыми
     const dirtyArray = Array.from(dirtyChunks);
+    // Сортируем dirty по расстоянию
+    dirtyArray.sort((a, b) => {
+        const [ax, az] = a.split(',');
+        const [bx, bz] = b.split(',');
+        const da = (ax - pcx) ** 2 + (az - pcz) ** 2;
+        const db = (bx - pcx) ** 2 + (bz - pcz) ** 2;
+        return da - db;
+    });
+
     for (const key of dirtyArray) {
         if (built >= maxBuildsPerFrame) break;
         if (!chunks[key]) {
@@ -134,34 +164,27 @@ function updateChunks() {
         built++;
     }
 
-    // 3. Построение новых мешей из очереди
-    // Обрабатываем не более maxBuildsPerFrame за кадр
-    // Важно: итерируем только по текущей длине, не добавляя в бесконечный цикл
-    const queueLengthThisFrame = chunkMeshQueue.length;
-    const deferred = [];
-
-    for (let i = 0; i < queueLengthThisFrame && built < maxBuildsPerFrame + 1; i++) {
+    // 5. Построение мешей из очереди (новые чанки)
+    const queueLen = chunkMeshQueue.length;
+    for (let i = 0; i < queueLen && built < maxBuildsPerFrame; i++) {
         const key = chunkMeshQueue.shift();
-        if (!key) break;
-        if (!chunks[key] || chunkMeshes[key]) continue;
+        if (!key || !chunks[key] || chunkMeshes[key]) continue;
 
         const [cx, cz] = key.split(',').map(Number);
         chunkMeshes[key] = buildChunkMesh(cx, cz);
         built++;
     }
 
-    // Отложенные чанки возвращаем в очередь
-    for (const key of deferred) {
-        chunkMeshQueue.push(key);
-    }
-
-    // 4. Выгрузка далёких чанков
+    // 6. Выгрузка далёких чанков
+    const unloadDist2 = (RENDER_DIST + 2) ** 2;
     for (const key in chunks) {
         const [cx, cz] = key.split(',').map(Number);
         const dx = cx - pcx, dz = cz - pcz;
-        if (dx*dx + dz*dz > (RENDER_DIST + 2)**2) {
+        if (dx * dx + dz * dz > unloadDist2) {
             deleteChunkMesh(key);
             delete chunks[key];
+            // Очищаем кэш освещения если есть
+            if (chunkLightData[key]) delete chunkLightData[key];
         }
     }
 
@@ -362,8 +385,9 @@ function gameLoop(time) {
 
     updateChunks();
 
+    const fogDist = FOG_DISTANCE;
     const aspect = canvas.width / canvas.height;
-    const proj = mat4Perspective(70 * Math.PI / 180, aspect, .05, 200);
+    const proj = mat4Perspective(70 * Math.PI / 180, aspect, .05, fogDist * 1.5);
 
     const camFx = getCameraEffects(alpha);
 
@@ -509,9 +533,15 @@ async function init() {
     initInput(canvas, updateHotbar);
     player.inventory.onChange = updateHotbar;
 
-    canvas.addEventListener('click', () => {
-        if (!window.__audioInited) { initAudio(); window.__audioInited = true; }
-    });
+    if (!isMobile()) {
+        canvas.addEventListener('click', () => {
+            if (!window.__audioInited) { initAudio(); window.__audioInited = true; }
+        });
+    } else {
+        canvas.addEventListener('touchstart', () => {
+            initAudio();
+        }, { once: true, passive: true });
+    }
 
     updateHotbar();
     loadingEl.style.display = 'none';

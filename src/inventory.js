@@ -1,4 +1,4 @@
-import { registry, BLOCK } from './world.js';
+import { registry, BLOCK } from './world/world.js';
 
 // ── ItemStack ─────────────────────────────────────────────────────────────────
 
