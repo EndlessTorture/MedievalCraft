@@ -550,6 +550,9 @@ export function updateTilt(dt, horizontalSpeed, strafeDir) {
         }
     }
 
+    const pitchFactor = Math.cos(player.pitch);
+    targetTilt *= pitchFactor;
+
     player.tiltAngle += (targetTilt - player.tiltAngle) * Math.min(1, TILT_SMOOTHING * dt);
 }
 

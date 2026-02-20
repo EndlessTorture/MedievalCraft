@@ -251,7 +251,7 @@ export const BLOCK = (() => {
     });
 
     ids.SEA_LANTERN = registry.register('SEA_LANTERN', {
-        hardness: 1, lightEmit: { r: 2, g: 8, b: 8 }, texture: 'sea_lantern',
+        hardness: 1, lightEmit: { r: 5, g: 5, b: 15 }, texture: 'sea_lantern',
         particle: { colors: [[.45,.80,.95],[.35,.70,.88]], variance:.05, sound:'break_glass' },
     });
 
