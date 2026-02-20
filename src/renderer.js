@@ -321,7 +321,7 @@ async function loadCrackTextures() {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// CHUNK MESH BUILDING - FIXED VERSION (no greedy, reliable textures)
+// CHUNK MESH BUILDING
 // ══════════════════════════════════════════════════════════════════════════════
 
 export const chunkMeshes = {};
@@ -421,7 +421,7 @@ function computeAO(data, x, y, z, faceIdx, wxBase, wzBase) {
     return ao;
 }
 
-function pushQuad(verts, uv, sky, r, g, b, ao4, isTransparent, tQuads) {
+function pushQuad(verts, uv, lights4, ao4, isTransparent, tQuads) {
     const uvC = [
         [uv.u, uv.v + uv.vh],
         [uv.u + uv.uw, uv.v + uv.vh],
@@ -434,7 +434,8 @@ function pushQuad(verts, uv, sky, r, g, b, ao4, isTransparent, tQuads) {
         for (const idx of [0, 1, 2, 0, 2, 3]) {
             pos.push(verts[idx][0], verts[idx][1], verts[idx][2]);
             uvArr.push(uvC[idx][0], uvC[idx][1]);
-            lightArr.push(sky, r, g, b);
+            const L = lights4[idx];
+            lightArr.push(L.sky, L.r, L.g, L.b);
             aoArr.push(ao4[idx]);
         }
         const centerX = (verts[0][0] + verts[2][0]) * 0.5;
@@ -449,10 +450,11 @@ function pushQuad(verts, uv, sky, r, g, b, ao4, isTransparent, tQuads) {
             mb.positions[mb.posIdx++] = verts[idx][2];
             mb.uvs[mb.uvIdx++] = uvC[idx][0];
             mb.uvs[mb.uvIdx++] = uvC[idx][1];
-            mb.lights[mb.lightIdx++] = sky;
-            mb.lights[mb.lightIdx++] = r;
-            mb.lights[mb.lightIdx++] = g;
-            mb.lights[mb.lightIdx++] = b;
+            const L = lights4[idx];
+            mb.lights[mb.lightIdx++] = L.sky;
+            mb.lights[mb.lightIdx++] = L.r;
+            mb.lights[mb.lightIdx++] = L.g;
+            mb.lights[mb.lightIdx++] = L.b;
             mb.aos[mb.aoIdx++] = ao4[idx];
         }
     }
@@ -469,18 +471,27 @@ function pushCrossBlock(wx, y, wz, uv, sky, r, g, b) {
     const verts1 = [[wx, y + 1, wz], [wx + 1, y + 1, wz + 1], [wx + 1, y, wz + 1], [wx, y, wz]];
     const verts2 = [[wx + 1, y + 1, wz], [wx, y + 1, wz + 1], [wx, y, wz + 1], [wx + 1, y, wz]];
 
+    // Smooth light gradient for cross blocks (top brighter than bottom)
+    const topLight = { sky, r, g, b };
+    const bottomLight = { sky: sky * 0.7, r: r * 0.7, g: g * 0.7, b: b * 0.7 };
+
     const mb = meshBuilder;
     for (const verts of [verts1, verts2]) {
+        // Indices: 0,1 = top vertices, 2,3 = bottom vertices
+        const lights4 = [topLight, topLight, bottomLight, bottomLight];
+
         for (const idx of [0, 1, 2, 0, 2, 3, 2, 1, 0, 3, 2, 0]) {
-            mb.positions[mb.posIdx++] = verts[idx % 4][0];
-            mb.positions[mb.posIdx++] = verts[idx % 4][1];
-            mb.positions[mb.posIdx++] = verts[idx % 4][2];
-            mb.uvs[mb.uvIdx++] = uvC[idx % 4][0];
-            mb.uvs[mb.uvIdx++] = uvC[idx % 4][1];
-            mb.lights[mb.lightIdx++] = sky;
-            mb.lights[mb.lightIdx++] = r;
-            mb.lights[mb.lightIdx++] = g;
-            mb.lights[mb.lightIdx++] = b;
+            const vi = idx % 4;
+            mb.positions[mb.posIdx++] = verts[vi][0];
+            mb.positions[mb.posIdx++] = verts[vi][1];
+            mb.positions[mb.posIdx++] = verts[vi][2];
+            mb.uvs[mb.uvIdx++] = uvC[vi][0];
+            mb.uvs[mb.uvIdx++] = uvC[vi][1];
+            const L = lights4[vi];
+            mb.lights[mb.lightIdx++] = L.sky;
+            mb.lights[mb.lightIdx++] = L.r;
+            mb.lights[mb.lightIdx++] = L.g;
+            mb.lights[mb.lightIdx++] = L.b;
             mb.aos[mb.aoIdx++] = 1.0;
         }
     }
@@ -541,14 +552,13 @@ export function buildChunkMesh(cx, cz) {
                     return getBlock(wx + dx, ny, wz + dz);
                 };
 
-                // FIXED: Correct UV selection for each face
                 const uvFaces = [
-                    uvInfo.top,    // face 0: +Y
-                    uvInfo.bottom, // face 1: -Y
-                    uvInfo.side,   // face 2: +X
-                    uvInfo.side,   // face 3: -X
-                    uvInfo.side,   // face 4: +Z
-                    uvInfo.side,   // face 5: -Z
+                    uvInfo.top,
+                    uvInfo.bottom,
+                    uvInfo.side,
+                    uvInfo.side,
+                    uvInfo.side,
+                    uvInfo.side,
                 ];
 
                 for (let fi = 0; fi < 6; fi++) {
@@ -566,22 +576,27 @@ export function buildChunkMesh(cx, cz) {
 
                     if (!showFace) continue;
 
-                    const lx = x + dx;
-                    const ly = y + dy;
-                    const lz = z + dz;
-
-                    const light = getLightAt(lightData, data, cx, cz, lx, ly, lz);
-                    const dirMult = FACE_LIGHT_MULT[fi];
-                    const sky = (light.sky / MAX_LIGHT) * dirMult;
-                    const r = (light.r / MAX_LIGHT) * dirMult;
-                    const g = (light.g / MAX_LIGHT) * dirMult;
-                    const b = (light.b / MAX_LIGHT) * dirMult;
-
                     const verts = getFaceVerts(wx, y, wz, fi);
                     const uv = uvFaces[fi];
                     const ao4 = computeAO(data, x, y, z, fi, baseX, baseZ);
 
-                    pushQuad(verts, uv, sky, r, g, b, ao4, isAlpha, tQuads);
+                    // ═══ SMOOTH LIGHTING ═══
+                    const dirMult = FACE_LIGHT_MULT[fi];
+                    const lights4 = [];
+
+                    for (let vi = 0; vi < 4; vi++) {
+                        const smoothLight = getSmoothLight(
+                            lightData, data, cx, cz, x, y, z, fi, vi
+                        );
+                        lights4.push({
+                            sky: (smoothLight.sky / MAX_LIGHT) * dirMult,
+                            r: (smoothLight.r / MAX_LIGHT) * dirMult,
+                            g: (smoothLight.g / MAX_LIGHT) * dirMult,
+                            b: (smoothLight.b / MAX_LIGHT) * dirMult
+                        });
+                    }
+
+                    pushQuad(verts, uv, lights4, ao4, isAlpha, tQuads);
                 }
             }
         }
@@ -661,6 +676,151 @@ let particleData = null;
 function initParticleSystem() {
     particleData = new Float32Array(MAX_PARTICLES * 12);
     particleBuffer = gl.createBuffer();
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// SMOOTH LIGHTING
+// ══════════════════════════════════════════════════════════════════════════════
+
+// For each face and vertex: center, side1, side2, corner
+// Corner is only sampled if BOTH sides are NOT solid (prevents light leaking)
+const VERTEX_LIGHT_SAMPLES = [
+    // Face 0: +Y (top)
+    [
+        { center: [0,1,0], side1: [-1,1,0], side2: [0,1,1], corner: [-1,1,1] },
+        { center: [0,1,0], side1: [1,1,0], side2: [0,1,1], corner: [1,1,1] },
+        { center: [0,1,0], side1: [1,1,0], side2: [0,1,-1], corner: [1,1,-1] },
+        { center: [0,1,0], side1: [-1,1,0], side2: [0,1,-1], corner: [-1,1,-1] }
+    ],
+    // Face 1: -Y (bottom)
+    [
+        { center: [0,-1,0], side1: [-1,-1,0], side2: [0,-1,-1], corner: [-1,-1,-1] },
+        { center: [0,-1,0], side1: [1,-1,0], side2: [0,-1,-1], corner: [1,-1,-1] },
+        { center: [0,-1,0], side1: [1,-1,0], side2: [0,-1,1], corner: [1,-1,1] },
+        { center: [0,-1,0], side1: [-1,-1,0], side2: [0,-1,1], corner: [-1,-1,1] }
+    ],
+    // Face 2: +X (east)
+    [
+        { center: [1,0,0], side1: [1,1,0], side2: [1,0,-1], corner: [1,1,-1] },
+        { center: [1,0,0], side1: [1,1,0], side2: [1,0,1], corner: [1,1,1] },
+        { center: [1,0,0], side1: [1,-1,0], side2: [1,0,1], corner: [1,-1,1] },
+        { center: [1,0,0], side1: [1,-1,0], side2: [1,0,-1], corner: [1,-1,-1] }
+    ],
+    // Face 3: -X (west)
+    [
+        { center: [-1,0,0], side1: [-1,1,0], side2: [-1,0,1], corner: [-1,1,1] },
+        { center: [-1,0,0], side1: [-1,1,0], side2: [-1,0,-1], corner: [-1,1,-1] },
+        { center: [-1,0,0], side1: [-1,-1,0], side2: [-1,0,-1], corner: [-1,-1,-1] },
+        { center: [-1,0,0], side1: [-1,-1,0], side2: [-1,0,1], corner: [-1,-1,1] }
+    ],
+    // Face 4: +Z (south)
+    [
+        { center: [0,0,1], side1: [1,0,1], side2: [0,1,1], corner: [1,1,1] },
+        { center: [0,0,1], side1: [-1,0,1], side2: [0,1,1], corner: [-1,1,1] },
+        { center: [0,0,1], side1: [-1,0,1], side2: [0,-1,1], corner: [-1,-1,1] },
+        { center: [0,0,1], side1: [1,0,1], side2: [0,-1,1], corner: [1,-1,1] }
+    ],
+    // Face 5: -Z (north)
+    [
+        { center: [0,0,-1], side1: [-1,0,-1], side2: [0,1,-1], corner: [-1,1,-1] },
+        { center: [0,0,-1], side1: [1,0,-1], side2: [0,1,-1], corner: [1,1,-1] },
+        { center: [0,0,-1], side1: [1,0,-1], side2: [0,-1,-1], corner: [1,-1,-1] },
+        { center: [0,0,-1], side1: [-1,0,-1], side2: [0,-1,-1], corner: [-1,-1,-1] }
+    ]
+];
+
+function getSmoothLight(lightData, blockData, cx, cz, x, y, z, faceIdx, vertIdx) {
+    const sample = VERTEX_LIGHT_SAMPLES[faceIdx][vertIdx];
+
+    // Helper to check if block at offset is opaque (blocks light)
+    const isBlockOpaque = (ox, oy, oz) => {
+        const lx = x + ox;
+        const ly = y + oy;
+        const lz = z + oz;
+
+        if (ly < 0) return true;  // Below world = solid
+        if (ly >= CHUNK_HEIGHT) return false;  // Above world = air
+
+        let block;
+        if (lx >= 0 && lx < CHUNK_SIZE && lz >= 0 && lz < CHUNK_SIZE) {
+            const bidx = lx * CHUNK_HEIGHT * CHUNK_SIZE + ly * CHUNK_SIZE + lz;
+            block = blockData[bidx];
+        } else {
+            const wx = cx * CHUNK_SIZE + lx;
+            const wz = cz * CHUNK_SIZE + lz;
+            block = getBlock(wx, ly, wz);
+        }
+        return block !== 0 && isOpaque(block);
+    };
+
+    // Helper to get light at offset
+    const getLightAtOffset = (ox, oy, oz) => {
+        return getLightAt(lightData, blockData, cx, cz, x + ox, y + oy, z + oz);
+    };
+
+    // Check solidity of sides
+    const centerSolid = isBlockOpaque(...sample.center);
+    const side1Solid = isBlockOpaque(...sample.side1);
+    const side2Solid = isBlockOpaque(...sample.side2);
+    const cornerSolid = isBlockOpaque(...sample.corner);
+
+    // Corner is blocked if BOTH sides are solid (this prevents diagonal light leaking)
+    const cornerBlocked = side1Solid && side2Solid;
+
+    let totalSky = 0, totalR = 0, totalG = 0, totalB = 0;
+    let count = 0;
+
+    // Sample center (face normal direction) - always try
+    if (!centerSolid) {
+        const light = getLightAtOffset(...sample.center);
+        totalSky += light.sky;
+        totalR += light.r;
+        totalG += light.g;
+        totalB += light.b;
+        count++;
+    }
+
+    // Sample side 1
+    if (!side1Solid) {
+        const light = getLightAtOffset(...sample.side1);
+        totalSky += light.sky;
+        totalR += light.r;
+        totalG += light.g;
+        totalB += light.b;
+        count++;
+    }
+
+    // Sample side 2
+    if (!side2Solid) {
+        const light = getLightAtOffset(...sample.side2);
+        totalSky += light.sky;
+        totalR += light.r;
+        totalG += light.g;
+        totalB += light.b;
+        count++;
+    }
+
+    // Sample corner - ONLY if not blocked by both sides AND corner itself is not solid
+    if (!cornerBlocked && !cornerSolid) {
+        const light = getLightAtOffset(...sample.corner);
+        totalSky += light.sky;
+        totalR += light.r;
+        totalG += light.g;
+        totalB += light.b;
+        count++;
+    }
+
+    // If all samples blocked, return minimum light
+    if (count === 0) {
+        return { sky: 0, r: 0, g: 0, b: 0 };
+    }
+
+    return {
+        sky: totalSky / count,
+        r: totalR / count,
+        g: totalG / count,
+        b: totalB / count
+    };
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
