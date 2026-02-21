@@ -65,7 +65,7 @@ function getCollidingBlocks(ex, ey, ez, w, h) {
             for (let bz = minZ; bz <= maxZ; bz++) {
                 if (isSolid(bx, by, bz)) {
                     if (ex + w > bx + 0.0001 && ex - w < bx + 1 - 0.0001 &&
-                        ey + h > by + 0.0001 && ey      < by + 1 - 0.0001 &&
+                        ey + h > by + 0.0001 && ey < by + 1 - 0.0001 &&
                         ez + w > bz + 0.0001 && ez - w < bz + 1 - 0.0001) {
                         blocks.push({ bx, by, bz });
                     }
@@ -93,7 +93,7 @@ function applyPhysics(e, dt) {
     e.onGround = false;
 
     // Разбиваем шаг на подшаги при большой скорости
-    const speed = Math.sqrt(e.vx*e.vx + e.vy*e.vy + e.vz*e.vz);
+    const speed = Math.sqrt(e.vx * e.vx + e.vy * e.vy + e.vz * e.vz);
     const substeps = Math.max(1, Math.ceil(speed * dt / (w * 0.5)));
     const sdt = dt / substeps;
 

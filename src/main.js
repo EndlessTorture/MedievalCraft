@@ -20,6 +20,7 @@ import {
 } from './player.js';
 import { entityManager, ItemEntity } from './world/entities.js';
 import { ItemStack } from './inventory.js';
+import { initConsole, isConsoleOpen } from './console.js';
 
 const PHYSICS_DT = 1 / 60;
 const MAX_PHYSICS_STEPS = 8;
@@ -396,7 +397,9 @@ function gameLoop(time) {
         gl.viewport(0, 0, canvas.width, canvas.height);
     }
 
-    updateCamera();
+    if (!isConsoleOpen()) {
+        updateCamera();
+    }
 
     physicsAccumulator += realDt;
     let physicsSteps = 0;
@@ -434,7 +437,7 @@ function gameLoop(time) {
 
     gameTime += realDt;
 
-    const hit = updateBlockInteraction(realDt, spawnParticles, spawnItemDrop);
+    const hit = isConsoleOpen() ? null : updateBlockInteraction(realDt, spawnParticles, spawnItemDrop);
 
     if (player.inventory.dirty) {
         player.inventory.clearDirty();
@@ -600,6 +603,11 @@ async function init() {
 
     initInput(canvas, updateHotbar);
     player.inventory.onChange = updateHotbar;
+
+    initConsole({
+        getGameTime: () => gameTime,
+        setGameTime: (v) => { gameTime = v; },
+    });
 
     if (!isMobile()) {
         canvas.addEventListener('click', () => {

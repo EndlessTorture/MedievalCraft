@@ -3,6 +3,7 @@ import { updateLightingForBlock } from './world/lighting.js';
 import { Inventory, Hotbar, ItemStack } from './inventory.js';
 import { entityManager } from './world/entities.js';
 import { playSound } from './res/audio.js';
+import { isConsoleOpen } from './console.js';
 
 const GRAVITY = -22;
 const JUMP_VEL = 7.5;
@@ -134,6 +135,7 @@ export let pointerLocked = false;
 
 export function initInput(canvas, onSlotChange) {
     document.addEventListener('keydown', e => {
+        if (isConsoleOpen()) return;
         keys[e.code] = true;
         if (e.code === 'KeyF') player.flying = !player.flying;
         if (e.code >= 'Digit1' && e.code <= 'Digit9') {
@@ -141,7 +143,10 @@ export function initInput(canvas, onSlotChange) {
             onSlotChange?.();
         }
     });
-    document.addEventListener('keyup', e => keys[e.code] = false);
+    document.addEventListener('keyup', e => {
+        if (isConsoleOpen()) return;
+        keys[e.code] = false;
+    });
 
     canvas.addEventListener('click', () => {
         if (!pointerLocked) canvas.requestPointerLock();
@@ -154,7 +159,7 @@ export function initInput(canvas, onSlotChange) {
         if (pointerLocked) { mouse.dx += e.movementX; mouse.dy += e.movementY; }
     });
     document.addEventListener('mousedown', e => {
-        if (!pointerLocked) return;
+        if (!pointerLocked || isConsoleOpen()) return;
         if (e.button === 0) mouse.left = true;
         if (e.button === 2) { mouse.right = true; mouse.rightUsed = false; }
     });
@@ -165,6 +170,7 @@ export function initInput(canvas, onSlotChange) {
     document.addEventListener('contextmenu', e => e.preventDefault());
 
     document.addEventListener('wheel', e => {
+        if (isConsoleOpen()) return;
         if (e.deltaY > 0) player.hotbar.selectNext();
         else player.hotbar.selectPrev();
         onSlotChange?.();
@@ -440,7 +446,7 @@ export function updatePlayerPhysics(dt, onSpawnParticles, onSpawnItemDrop) {
     const hasInput = inputLen > 0;
 
     player.sprinting = keys['ShiftLeft'] && hasInput && player.onGround;
-    const targetSpeed = MAX_SPEED * (player.sprinting ? SPRINT_MULTIPLIER : 1);
+    const targetSpeed = player.speed * (player.sprinting ? SPRINT_MULTIPLIER : 1);
 
     if (player.flying) {
         let my = 0;

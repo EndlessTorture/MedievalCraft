@@ -687,45 +687,45 @@ function initParticleSystem() {
 const VERTEX_LIGHT_SAMPLES = [
     // Face 0: +Y (top)
     [
-        { center: [0,1,0], side1: [-1,1,0], side2: [0,1,1], corner: [-1,1,1] },
-        { center: [0,1,0], side1: [1,1,0], side2: [0,1,1], corner: [1,1,1] },
-        { center: [0,1,0], side1: [1,1,0], side2: [0,1,-1], corner: [1,1,-1] },
-        { center: [0,1,0], side1: [-1,1,0], side2: [0,1,-1], corner: [-1,1,-1] }
+        { center: [0, 1, 0], side1: [-1, 1, 0], side2: [0, 1, 1], corner: [-1, 1, 1] },
+        { center: [0, 1, 0], side1: [1, 1, 0], side2: [0, 1, 1], corner: [1, 1, 1] },
+        { center: [0, 1, 0], side1: [1, 1, 0], side2: [0, 1, -1], corner: [1, 1, -1] },
+        { center: [0, 1, 0], side1: [-1, 1, 0], side2: [0, 1, -1], corner: [-1, 1, -1] }
     ],
     // Face 1: -Y (bottom)
     [
-        { center: [0,-1,0], side1: [-1,-1,0], side2: [0,-1,-1], corner: [-1,-1,-1] },
-        { center: [0,-1,0], side1: [1,-1,0], side2: [0,-1,-1], corner: [1,-1,-1] },
-        { center: [0,-1,0], side1: [1,-1,0], side2: [0,-1,1], corner: [1,-1,1] },
-        { center: [0,-1,0], side1: [-1,-1,0], side2: [0,-1,1], corner: [-1,-1,1] }
+        { center: [0, -1, 0], side1: [-1, -1, 0], side2: [0, -1, -1], corner: [-1, -1, -1] },
+        { center: [0, -1, 0], side1: [1, -1, 0], side2: [0, -1, -1], corner: [1, -1, -1] },
+        { center: [0, -1, 0], side1: [1, -1, 0], side2: [0, -1, 1], corner: [1, -1, 1] },
+        { center: [0, -1, 0], side1: [-1, -1, 0], side2: [0, -1, 1], corner: [-1, -1, 1] }
     ],
     // Face 2: +X (east)
     [
-        { center: [1,0,0], side1: [1,1,0], side2: [1,0,-1], corner: [1,1,-1] },
-        { center: [1,0,0], side1: [1,1,0], side2: [1,0,1], corner: [1,1,1] },
-        { center: [1,0,0], side1: [1,-1,0], side2: [1,0,1], corner: [1,-1,1] },
-        { center: [1,0,0], side1: [1,-1,0], side2: [1,0,-1], corner: [1,-1,-1] }
+        { center: [1, 0, 0], side1: [1, 1, 0], side2: [1, 0, -1], corner: [1, 1, -1] },
+        { center: [1, 0, 0], side1: [1, 1, 0], side2: [1, 0, 1], corner: [1, 1, 1] },
+        { center: [1, 0, 0], side1: [1, -1, 0], side2: [1, 0, 1], corner: [1, -1, 1] },
+        { center: [1, 0, 0], side1: [1, -1, 0], side2: [1, 0, -1], corner: [1, -1, -1] }
     ],
     // Face 3: -X (west)
     [
-        { center: [-1,0,0], side1: [-1,1,0], side2: [-1,0,1], corner: [-1,1,1] },
-        { center: [-1,0,0], side1: [-1,1,0], side2: [-1,0,-1], corner: [-1,1,-1] },
-        { center: [-1,0,0], side1: [-1,-1,0], side2: [-1,0,-1], corner: [-1,-1,-1] },
-        { center: [-1,0,0], side1: [-1,-1,0], side2: [-1,0,1], corner: [-1,-1,1] }
+        { center: [-1, 0, 0], side1: [-1, 1, 0], side2: [-1, 0, 1], corner: [-1, 1, 1] },
+        { center: [-1, 0, 0], side1: [-1, 1, 0], side2: [-1, 0, -1], corner: [-1, 1, -1] },
+        { center: [-1, 0, 0], side1: [-1, -1, 0], side2: [-1, 0, -1], corner: [-1, -1, -1] },
+        { center: [-1, 0, 0], side1: [-1, -1, 0], side2: [-1, 0, 1], corner: [-1, -1, 1] }
     ],
     // Face 4: +Z (south)
     [
-        { center: [0,0,1], side1: [1,0,1], side2: [0,1,1], corner: [1,1,1] },
-        { center: [0,0,1], side1: [-1,0,1], side2: [0,1,1], corner: [-1,1,1] },
-        { center: [0,0,1], side1: [-1,0,1], side2: [0,-1,1], corner: [-1,-1,1] },
-        { center: [0,0,1], side1: [1,0,1], side2: [0,-1,1], corner: [1,-1,1] }
+        { center: [0, 0, 1], side1: [1, 0, 1], side2: [0, 1, 1], corner: [1, 1, 1] },
+        { center: [0, 0, 1], side1: [-1, 0, 1], side2: [0, 1, 1], corner: [-1, 1, 1] },
+        { center: [0, 0, 1], side1: [-1, 0, 1], side2: [0, -1, 1], corner: [-1, -1, 1] },
+        { center: [0, 0, 1], side1: [1, 0, 1], side2: [0, -1, 1], corner: [1, -1, 1] }
     ],
     // Face 5: -Z (north)
     [
-        { center: [0,0,-1], side1: [-1,0,-1], side2: [0,1,-1], corner: [-1,1,-1] },
-        { center: [0,0,-1], side1: [1,0,-1], side2: [0,1,-1], corner: [1,1,-1] },
-        { center: [0,0,-1], side1: [1,0,-1], side2: [0,-1,-1], corner: [1,-1,-1] },
-        { center: [0,0,-1], side1: [-1,0,-1], side2: [0,-1,-1], corner: [-1,-1,-1] }
+        { center: [0, 0, -1], side1: [-1, 0, -1], side2: [0, 1, -1], corner: [-1, 1, -1] },
+        { center: [0, 0, -1], side1: [1, 0, -1], side2: [0, 1, -1], corner: [1, 1, -1] },
+        { center: [0, 0, -1], side1: [1, 0, -1], side2: [0, -1, -1], corner: [1, -1, -1] },
+        { center: [0, 0, -1], side1: [-1, 0, -1], side2: [0, -1, -1], corner: [-1, -1, -1] }
     ]
 ];
 

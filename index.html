@@ -1,8 +1,10 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="viewport"
+        content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <!-- Для iOS "Add to Home Screen" — полноэкранный режим -->
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -10,23 +12,36 @@
     <title>Medieval Voxel World</title>
     <link rel="stylesheet" href="style.css">
 </head>
+
 <body>
 
-<div id="loading">
-    <div class="loading-content">
-        <h1>⚔ Medieval Voxel World ⚔</h1>
-        <div class="bar"><div class="fill" id="loadFill"></div></div>
-        <div class="tip" id="loadTip">Forging the world...</div>
+    <div id="loading">
+        <div class="loading-content">
+            <h1>⚔ Medieval Voxel World ⚔</h1>
+            <div class="bar">
+                <div class="fill" id="loadFill"></div>
+            </div>
+            <div class="tip" id="loadTip">Forging the world...</div>
+        </div>
     </div>
-</div>
 
-<canvas id="gameCanvas"></canvas>
+    <canvas id="gameCanvas"></canvas>
 
-<div id="crosshair">✦</div>
-<div id="info"></div>
-<div id="hotbar"></div>
+    <div id="crosshair">✦</div>
+    <div id="info"></div>
+    <div id="hotbar"></div>
 
-<script type="module" src="src/main.js"></script>
-<script type="module" src="src/mobile.js"></script>
+    <div id="gameConsole">
+        <div id="consoleOutput"></div>
+        <div class="console-input-row">
+            <span class="console-prompt">❯</span>
+            <input type="text" id="consoleInput" autocomplete="off" spellcheck="false"
+                placeholder="Type a command... (/help)">
+        </div>
+    </div>
+
+    <script type="module" src="src/main.js"></script>
+    <script type="module" src="src/mobile.js"></script>
 </body>
+
 </html>
