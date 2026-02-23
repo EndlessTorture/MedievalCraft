@@ -21,6 +21,7 @@ import {
 import { entityManager, ItemEntity } from './world/entities.js';
 import { ItemStack } from './inventory.js';
 import { initConsole, isConsoleOpen } from './console.js';
+import { mobManager } from './entities/MobManager.js';
 
 const PHYSICS_DT = 1 / 60;
 const MAX_PHYSICS_STEPS = 8;
@@ -369,6 +370,7 @@ let frameCount = 0;
 let lastFpsTime = 0;
 let currentFps = 0;
 let lastPhysicsSteps = 0;
+let nextMobSpawnTime = 0;
 
 function gameLoop(time) {
     requestAnimationFrame(gameLoop);
@@ -506,6 +508,7 @@ function gameLoop(time) {
         particles: activeParticles,
         breakingBlock,
         entities: entityManager.getItemEntities(),
+        mobs: entityManager.getMobs(),
         crossBlocks: CROSS_BLOCKS,
         alpha
     });
@@ -513,6 +516,9 @@ function gameLoop(time) {
     renderCrosshair(canvas.width, canvas.height);
 
     updateHUD(currentHit, triCount / 3, currentFps, lastPhysicsSteps);
+
+    // Управление мобами (AI + Spawning)
+    mobManager.update(gameTime, realDt);
 
     lastFrameTime = performance.now() - frameStart;
 }
@@ -621,6 +627,9 @@ async function init() {
 
     updateHotbar();
     loadingEl.style.display = 'none';
+
+    // Инициализация системы мобов
+    mobManager.init();
 
     lastTime = performance.now();
     lastFpsTime = lastTime;

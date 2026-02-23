@@ -76,7 +76,7 @@ function getCollidingBlocks(ex, ey, ez, w, h) {
     return blocks;
 }
 
-function applyPhysics(e, dt) {
+export function applyPhysics(e, dt) {
     const w = e.width, h = e.height;
 
     e.vy += GRAVITY * dt;
@@ -235,11 +235,14 @@ class EntityManager {
         this.entities = new Map();
         this._itemList = [];
         this._itemsDirty = true;
+        this._mobList = [];
+        this._mobsDirty = true;
     }
 
     add(entity) {
         this.entities.set(entity.id, entity);
         if (entity.type === 'item') this._itemsDirty = true;
+        if (entity.type === 'mob') this._mobsDirty = true;
         return entity;
     }
 
@@ -254,6 +257,17 @@ class EntityManager {
             this._itemsDirty = false;
         }
         return this._itemList;
+    }
+
+    getMobs() {
+        if (this._mobsDirty) {
+            this._mobList = [];
+            for (const e of this.entities.values()) {
+                if (e.type === 'mob' && !e.dead) this._mobList.push(e);
+            }
+            this._mobsDirty = false;
+        }
+        return this._mobList;
     }
 
     getItemsNear(x, y, z, radius) {
@@ -290,7 +304,10 @@ class EntityManager {
             }
         }
 
-        if (removed) this._itemsDirty = true;
+        if (removed) {
+            this._itemsDirty = true;
+            this._mobsDirty = true;
+        }
     }
 
     removeDistant(x, z, maxDist) {
@@ -303,7 +320,10 @@ class EntityManager {
                 removed = true;
             }
         }
-        if (removed) this._itemsDirty = true;
+        if (removed) {
+            this._itemsDirty = true;
+            this._mobsDirty = true;
+        }
     }
 }
 

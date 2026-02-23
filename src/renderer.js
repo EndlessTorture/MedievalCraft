@@ -210,7 +210,7 @@ function parseShaderFile(source) {
 }
 
 async function loadAllShaders(onProgress) {
-    const shaderNames = ['main', 'particle', 'sky', 'ui', 'crack', 'item'];
+    const shaderNames = ['main', 'particle', 'sky', 'ui', 'crack', 'item', 'mob'];
     const shaders = {};
     let loaded = 0;
     for (const name of shaderNames) {
@@ -824,6 +824,128 @@ function getSmoothLight(lightData, blockData, cx, cz, x, y, z, faceIdx, vertIdx)
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
+// MOBS
+// ══════════════════════════════════════════════════════════════════════════════
+
+let mobProgram, mobPosLoc, mobUvLoc, mobNormalLoc, mobJointsLoc, mobWeightsLoc;
+let mobMvpLoc, mobJointMatLoc, mobSkyLightLoc, mobBlockLightLoc, mobDayTimeLoc, mobFogColorLoc, mobFogDistLoc;
+
+function renderMobsInternal(mobs, viewProj, eyePos, alpha, dayTime, fogColor, fogDist) {
+    if (!mobs || !mobs.length) return;
+    disableAllAttribs();
+    gl.useProgram(mobProgram);
+    gl.depthMask(true);
+    gl.enable(gl.DEPTH_TEST);
+
+    gl.uniform1f(mobDayTimeLoc, dayTime);
+    gl.uniform3f(mobFogColorLoc, fogColor[0], fogColor[1], fogColor[2]);
+    gl.uniform1f(mobFogDistLoc, fogDist);
+    gl.uniform1i(gl.getUniformLocation(mobProgram, 'uTex'), 0);
+    gl.uniform1f(gl.getUniformLocation(mobProgram, 'uAlpha'), 1.0);
+
+    for (const mob of mobs) {
+        if (!mob.model) continue;
+
+        const modelMat = mob.getInterpolatedModelMatrix(alpha);
+        const mvp = mat4Mul(viewProj, modelMat);
+        gl.uniformMatrix4fv(mobMvpLoc, false, mvp);
+
+        const pos = mob.getInterpolatedPos(alpha);
+        const light = getWorldLight(pos.x, pos.y + 0.5, pos.z);
+        gl.uniform1f(mobSkyLightLoc, light.sky);
+        gl.uniform3f(mobBlockLightLoc, light.r, light.g, light.b);
+
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, mob.texture || glTexture);
+
+        const nodes = mob.model.nodes;
+        const skins = mob.model.skins;
+
+        const drawPrimitive = (prim, nodeMat) => {
+            if (nodeMat) {
+                // Шейдер ожидает массив из 64 матриц, ставим nodeMat первой
+                const rigidJoints = new Float32Array(64 * 16);
+                for (let j = 0; j < 16; j++) rigidJoints[j] = nodeMat[j];
+                // Остальные матрицы - identity
+                for (let j = 1; j < 64; j++) {
+                    const off = j * 16;
+                    rigidJoints[off] = 1; rigidJoints[off + 5] = 1; rigidJoints[off + 10] = 1; rigidJoints[off + 15] = 1;
+                }
+                gl.uniformMatrix4fv(mobJointMatLoc, false, rigidJoints);
+                gl.disableVertexAttribArray(mobJointsLoc);
+                gl.disableVertexAttribArray(mobWeightsLoc);
+                gl.vertexAttrib4f(mobJointsLoc, 0, 0, 0, 0);
+                gl.vertexAttrib4f(mobWeightsLoc, 1, 0, 0, 0);
+            } else {
+                const jBuf = prim.buffers.joints_0 || prim.buffers.joints;
+                const wBuf = prim.buffers.weights_0 || prim.buffers.weights;
+                if (jBuf && wBuf) {
+                    gl.bindBuffer(gl.ARRAY_BUFFER, jBuf);
+                    gl.vertexAttribPointer(mobJointsLoc, 4, gl.FLOAT, false, 0, 0);
+                    enableAttrib(mobJointsLoc);
+                    gl.bindBuffer(gl.ARRAY_BUFFER, wBuf);
+                    gl.vertexAttribPointer(mobWeightsLoc, 4, gl.FLOAT, false, 0, 0);
+                    enableAttrib(mobWeightsLoc);
+                } else {
+                    gl.disableVertexAttribArray(mobJointsLoc);
+                    gl.disableVertexAttribArray(mobWeightsLoc);
+                    gl.vertexAttrib4f(mobJointsLoc, 0, 0, 0, 0);
+                    gl.vertexAttrib4f(mobWeightsLoc, 1, 0, 0, 0);
+                }
+            }
+
+            const pBuf = prim.buffers.position || prim.buffers.pos;
+            if (pBuf) {
+                gl.bindBuffer(gl.ARRAY_BUFFER, pBuf);
+                gl.vertexAttribPointer(mobPosLoc, 3, gl.FLOAT, false, 0, 0);
+                enableAttrib(mobPosLoc);
+            }
+            const uBuf = prim.buffers.texcoord_0 || prim.buffers.uv;
+            if (uBuf) {
+                gl.bindBuffer(gl.ARRAY_BUFFER, uBuf);
+                gl.vertexAttribPointer(mobUvLoc, 2, gl.FLOAT, false, 0, 0);
+                enableAttrib(mobUvLoc);
+            }
+            const nBuf = prim.buffers.normal;
+            if (nBuf) {
+                gl.bindBuffer(gl.ARRAY_BUFFER, nBuf);
+                gl.vertexAttribPointer(mobNormalLoc, 3, gl.FLOAT, false, 0, 0);
+                if (mobNormalLoc !== -1) enableAttrib(mobNormalLoc);
+            } else if (mobNormalLoc !== -1) {
+                gl.disableVertexAttribArray(mobNormalLoc);
+                gl.vertexAttrib3f(mobNormalLoc, 0, 1, 0);
+            }
+
+            if (prim.buffers.indices) {
+                gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, prim.buffers.indices);
+                gl.drawElements(gl.TRIANGLES, prim.count, prim.indexType || gl.UNSIGNED_SHORT, 0);
+            } else {
+                gl.drawArrays(gl.TRIANGLES, 0, prim.count);
+            }
+        };
+
+        if (skins && skins.length > 0) {
+            gl.uniformMatrix4fv(mobJointMatLoc, false, mob.jointMatrices);
+            for (const mesh of mob.model.meshes) {
+                for (const prim of mesh.primitives) {
+                    drawPrimitive(prim);
+                }
+            }
+        } else {
+            for (let i = 0; i < nodes.length; i++) {
+                const node = nodes[i];
+                if (node.mesh === undefined) continue;
+                const mesh = mob.model.meshes[node.mesh];
+                const nodeMat = mob._nodeMatrices[i];
+                for (const prim of mesh.primitives) {
+                    drawPrimitive(prim, nodeMat);
+                }
+            }
+        }
+    }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
 // INITIALIZATION
 // ══════════════════════════════════════════════════════════════════════════════
 
@@ -848,6 +970,20 @@ export async function initGL(canvas, onTextureProgress = null, onShaderProgress 
     uiProgram = createProgramFromShader(shaders.ui);
     crackProgram = createProgramFromShader(shaders.crack);
     itemProgram = createProgramFromShader(shaders.item);
+    mobProgram = createProgramFromShader(shaders.mob);
+
+    mobPosLoc = gl.getAttribLocation(mobProgram, 'aPos');
+    mobUvLoc = gl.getAttribLocation(mobProgram, 'aUV');
+    mobNormalLoc = gl.getAttribLocation(mobProgram, 'aNormal');
+    mobJointsLoc = gl.getAttribLocation(mobProgram, 'aJoints');
+    mobWeightsLoc = gl.getAttribLocation(mobProgram, 'aWeights');
+    mobMvpLoc = gl.getUniformLocation(mobProgram, 'uMVP');
+    mobJointMatLoc = gl.getUniformLocation(mobProgram, 'uJointMat');
+    mobSkyLightLoc = gl.getUniformLocation(mobProgram, 'uSkyLight');
+    mobBlockLightLoc = gl.getUniformLocation(mobProgram, 'uBlockLight');
+    mobDayTimeLoc = gl.getUniformLocation(mobProgram, 'uDayTime');
+    mobFogColorLoc = gl.getUniformLocation(mobProgram, 'uFogColor');
+    mobFogDistLoc = gl.getUniformLocation(mobProgram, 'uFogDist');
 
     itemPosLoc = gl.getAttribLocation(itemProgram, 'aPos');
     itemUvLoc = gl.getAttribLocation(itemProgram, 'aUV');
@@ -1115,7 +1251,7 @@ export let renderStats = {
 // MAIN RENDER
 // ══════════════════════════════════════════════════════════════════════════════
 
-export function renderFrame({ mvp, invVP, eyePos, gameTime, particles, breakingBlock, entities, crossBlocks, alpha }) {
+export function renderFrame({ mvp, invVP, eyePos, gameTime, particles, breakingBlock, entities, mobs, crossBlocks, alpha }) {
     const [eyeX, eyeY, eyeZ] = eyePos;
     const dayTime = Math.sin(gameTime * 0.02) * 0.5 + 0.5;
     const fogR = 0.18 + dayTime * 0.47, fogG = 0.25 + dayTime * 0.5, fogB = 0.4 + dayTime * 0.45;
@@ -1194,6 +1330,11 @@ export function renderFrame({ mvp, invVP, eyePos, gameTime, particles, breakingB
         gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
         renderItemEntitiesInternal(entities, mvp, eyePos, crossBlocks, alpha, dayTime, [fogR, fogG, fogB], fogDist);
         gl.disable(gl.BLEND);
+    }
+
+    // ═══ Mobs ═══
+    if (mobs?.length > 0) {
+        renderMobsInternal(mobs, mvp, eyePos, alpha, dayTime, [fogR, fogG, fogB], fogDist);
     }
 
     // ═══ Transparent blocks ═══
