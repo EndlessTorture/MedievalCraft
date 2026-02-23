@@ -1,0 +1,16 @@
+{
+  "name": "medieval-craft",
+  "version": "1.0.0",
+  "description": "Voxel engine with animated mobs",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "npx serve .",
+    "dev": "npx serve ."
+  },
+  "keywords": [],
+  "author": "",
+  "license": "GPL-3.0",
+  "devDependencies": {
+    "serve": "^14.2.1"
+  }
+}
